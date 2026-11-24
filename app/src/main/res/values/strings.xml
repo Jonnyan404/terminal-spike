@@ -252,7 +252,7 @@
     <string name="settings_edit_keyboard_keys_summary">Drag to reorder, or use Move before and Move after with TalkBack. Changes are committed only when you save.</string>
     <string name="settings_keyboard_key_count">%1$d keys · %2$d rows</string>
     <string name="settings_keyboard_chord_heading">Custom chords</string>
-    <string name="settings_keyboard_chord_summary">Chords follow the deck keys and are shared by the preview keyboard and the input keyboard.</string>
+    <string name="settings_keyboard_chord_summary">Chords lead the deck and are shared by the preview keyboard and the input keyboard.</string>
     <string name="settings_keyboard_chord_empty">No custom chords yet.</string>
     <string name="settings_keyboard_chord_add">Add a chord</string>
     <string name="settings_keyboard_chord_full">Limit reached</string>

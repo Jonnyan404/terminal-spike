@@ -249,7 +249,7 @@
     <string name="settings_edit_keyboard_keys_summary">拖动排序，或使用 TalkBack 的“向前移动”和“向后移动”。保存后才会应用更改。</string>
     <string name="settings_keyboard_key_count">%1$d 个按键 · %2$d 行</string>
     <string name="settings_keyboard_chord_heading">组合键</string>
-    <string name="settings_keyboard_chord_summary">组合键排在这套按键之后，示例键盘和输入框键盘共用同一份库。</string>
+    <string name="settings_keyboard_chord_summary">组合键排在按键栏最前面，示例键盘和输入框键盘共用同一份库。</string>
     <string name="settings_keyboard_chord_empty">还没有组合键。</string>
     <string name="settings_keyboard_chord_add">新增组合键</string>
     <string name="settings_keyboard_chord_full">已达上限</string>

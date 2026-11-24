@@ -328,15 +328,16 @@ fun TerminalAccessoryBar(
                 val columnCount = (terminalShortcutColumnCount(maxWidth.value) - 1).coerceAtLeast(1)
                 val keyWidth = terminalAccessoryKeyWidth(maxWidth)
                 val rowCount = layout.rowCount
-                // Library chords ride at the end of every deck; the default-layout pass looks only
-                // at the deck so one added chord cannot change how all the other keys are laid out.
+                // Library chords lead every deck: a full deck already fills the first page, so an
+                // appended chord would be invisible until the user swiped. The default-layout pass
+                // still looks only at the deck, so a chord cannot reshape the other keys.
                 val deckActions = actions.filterNot { it.isLibraryChordKey }
                 val chordActions = actions.filter { it.isLibraryChordKey }
                 val displayedDeck = displayedAccessoryActions(deckActions)
                 val displayedActions = displayedDeck + chordActions
-                val shortcutActions = displayedDeck.drop(1).filterNot {
+                val shortcutActions = chordActions + displayedDeck.drop(1).filterNot {
                     deckActions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
-                } + chordActions
+                }
                 val shortcutPages = terminalAccessoryPages(
                     shortcutActions, columnCount, rowCount,
                     customizationEnabled && !deckActions.matchDefaultAccessoryDeck(),
@@ -615,7 +616,7 @@ internal fun TerminalShortcutPreview(
             val deckActions = actions.filterNot { it.isLibraryChordKey }
             val chordActions = actions.filter { it.isLibraryChordKey }
             val displayedActions = displayedAccessoryActions(deckActions) + chordActions
-            val shortcuts = displayedActions.drop(1).filterNot {
+            val shortcuts = chordActions + displayedActions.drop(1).filterNot {
                 deckActions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
             }
             val pages = terminalAccessoryPages(shortcuts, columns, layout.rowCount,
