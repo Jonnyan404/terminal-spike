@@ -82,6 +82,8 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
             item(key = R.string.settings_keyboard_preset_heading) { SectionLabel(R.string.settings_keyboard_preset_heading) }
             item {
                 val selectedPresetId = KeyboardPresets.selectedId(profile)
+                val customShown = state.keyboardCustomDeckAvailable ||
+                    selectedPresetId == KeyboardPresets.CUSTOM_ID
                 HorizontalChoices {
                     KeyboardPresets.selectable.forEach { preset ->
                         FilterChip(
@@ -90,19 +92,22 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                             label = { Text(stringResource(preset.labelRes)) },
                         )
                     }
-                    if (selectedPresetId == "custom") {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.settings_keyboard_preset_custom),
-                                style = MaterialTheme.typography.labelLarge,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                        }
+                    if (customShown) {
+                        FilterChip(
+                            selected = selectedPresetId == KeyboardPresets.CUSTOM_ID,
+                            onClick = { actions.onKeyboardPreset(KeyboardPresets.CUSTOM_ID) },
+                            label = { Text(stringResource(R.string.settings_keyboard_preset_custom)) },
+                            modifier = Modifier.testTag(KeyboardPresetCustomTestTag),
+                        )
                     }
+                }
+                if (customShown) {
+                    Text(
+                        text = stringResource(R.string.settings_keyboard_preset_custom_summary),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                 }
             }
             item(key = R.string.settings_edit_keyboard_keys) {
@@ -701,3 +706,4 @@ internal fun keyboardActionLabel(action: KeyboardAction): String = when (action)
 
 internal const val KeyboardSettingsTestTag = "keyboard-settings"
 internal const val KeyboardPreviewTestTag = "keyboard-profile-preview"
+internal const val KeyboardPresetCustomTestTag = "keyboard-preset-custom"

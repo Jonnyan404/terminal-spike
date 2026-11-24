@@ -67,9 +67,9 @@ message AppSettings {
   // Device-local accessory button backgrounds, keyed by runtime stable ID.
   map<string, string> button_colors = 32;
 
-  // Device-local memory of customized preset decks, keyed by preset ID. The reserved key "@base"
-  // records which preset the live keyboard profile was last applied from.
-  map<string, string> keyboard_preset_snapshots = 36;
+  // Device-local copy of the deck the user built by editing a preset. Presets are read-only
+  // templates, so this payload is what the Custom preset chip restores. Empty when never edited.
+  string keyboard_custom_deck = 36;
 
   // Message presence distinguishes an untouched install from an intentionally empty agent list.
   AiAgentConfiguration ai_agents = 31;

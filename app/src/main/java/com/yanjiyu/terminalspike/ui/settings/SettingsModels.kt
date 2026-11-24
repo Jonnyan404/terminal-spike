@@ -213,6 +213,8 @@ internal data class SettingsUiState(
     val keyboardProfile: KeyboardProfile? = null,
     val importedFonts: List<ImportedTerminalFont> = emptyList(),
     val customTerminalThemes: List<CustomTerminalTheme> = emptyList(),
+    /** Whether a customized deck is saved, so the Custom preset chip can offer to restore it. */
+    val keyboardCustomDeckAvailable: Boolean = false,
     val profilesLoading: Boolean = true,
     val writeInProgress: Boolean = false,
     @StringRes val message: Int? = null,
@@ -445,7 +447,14 @@ internal object KeyboardPresets {
 
     val selectable = listOf(general, vim, minimal)
 
-    fun selectedId(profile: KeyboardProfile): String = selectable.firstOrNull { it.matches(profile) }?.id ?: "custom"
+    /**
+     * Identity of the saved deck built by editing a preset. Presets are read-only templates, so an
+     * edited deck is reported as Custom instead of pretending to still be the preset it came from.
+     */
+    const val CUSTOM_ID = "custom"
+
+    fun selectedId(profile: KeyboardProfile): String =
+        selectable.firstOrNull { it.matches(profile) }?.id ?: CUSTOM_ID
 }
 
 internal data class KeyboardDeckMigrationPlan(

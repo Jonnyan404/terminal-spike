@@ -9,25 +9,24 @@ import com.yanjiyu.terminalspike.core.model.TerminalInputMode
 import com.yanjiyu.terminalspike.terminal.view.encodeTerminalChord
 
 /**
- * Remembers one customized deck per preset so switching presets stops discarding user edits.
+ * Keeps the deck the user built out of a preset alive as its own Custom configuration.
+ *
+ * Presets are read-only templates; editing the deck never modifies one, it produces a custom deck.
+ * That deck used to live only in the live profile, so picking any preset overwrote it and the
+ * customization was gone with no way back. Now every edit also stores a copy, and the Custom preset
+ * chip restores it.
  *
  * A snapshot only carries the deck fields. Restoring copies them onto the profile being edited, so
  * the profile identity, creation time, and connection bindings survive. Payloads are device-local,
- * bounded, and treated as untrusted: anything unreadable falls back to the shipped preset.
+ * bounded, and treated as untrusted: anything unreadable falls back to the live deck.
  */
 internal object KeyboardPresetMemory {
-    /** Reserved key naming the preset the live profile was last applied from. */
-    const val BASE_KEY = "@base"
-
-    /** Reported by [KeyboardPresets.selectedId] when no shipped preset matches the live deck. */
-    const val CUSTOM_PRESET_ID = "custom"
-
     private const val VERSION = "v1"
     private const val FIELD_COUNT = 8
     private const val MAX_VALUE_LENGTH = 2048
     private const val SEPARATOR = '|'
 
-    data class Applied(val memory: Map<String, String>, val profile: KeyboardProfile)
+    data class Applied(val memory: String, val profile: KeyboardProfile)
 
     fun snapshot(profile: KeyboardProfile): String = listOf(
         VERSION,
@@ -67,60 +66,50 @@ internal object KeyboardPresetMemory {
         }.getOrNull()
     }
 
-    /** Bounded copy: only the selectable preset keys and the reserved base key survive. */
-    fun sanitized(memory: Map<String, String>): Map<String, String> = buildMap {
-        KeyboardPresets.selectable.forEach { preset -> memory[preset.id]?.let { put(preset.id, it) } }
-        memory[BASE_KEY]?.let { put(BASE_KEY, it) }
-    }
+    /** The saved custom deck, or null when the user never built one or the payload is unusable. */
+    fun saved(memory: String, profile: KeyboardProfile): KeyboardProfile? =
+        memory.takeIf { it.isNotEmpty() }?.let { restore(it, profile) }
 
-    /** The preset the live deck was last applied from, defaulting to the shipped General preset. */
-    fun baseId(memory: Map<String, String>, profile: KeyboardProfile): String {
-        val stored = sanitized(memory)[BASE_KEY]
-        if (stored != null && KeyboardPresets.selectable.any { it.id == stored }) return stored
-        return KeyboardPresets.selectedId(profile)
-            .takeIf { it != CUSTOM_PRESET_ID }
-            ?: KeyboardPresets.general.id
-    }
+    fun hasSavedDeck(memory: String): Boolean = memory.isNotEmpty()
 
     /**
-     * Saves the live deck under its base preset when it no longer matches that preset, then returns
-     * the deck to persist: the remembered snapshot for [preset] or the shipped preset keys.
-     * [forget] is the explicit "restore General preset" path and deliberately keeps no snapshot.
+     * Payload to store after [updated] replaced [previous]. Only a deck that matches no shipped
+     * preset is remembered; applying a preset leaves the saved custom deck untouched.
+     */
+    fun remember(memory: String, updated: KeyboardProfile): String =
+        if (KeyboardPresets.selectedId(updated) == KeyboardPresets.CUSTOM_ID) snapshot(updated) else memory
+
+    /**
+     * Applies [target], or the saved custom deck when [target] is null, and returns the deck to
+     * persist plus the memory it implies. Leaving a custom deck for a preset stores it first, so a
+     * customization can never be dropped by a switch.
      */
     fun apply(
-        memory: Map<String, String>,
+        memory: String,
         current: KeyboardProfile,
-        preset: KeyboardPreset,
+        target: KeyboardPreset?,
         nowEpochMillis: Long,
-        forget: Boolean = false,
     ): Applied {
-        val next = sanitized(memory).toMutableMap()
-        if (forget) {
-            next.remove(preset.id)
+        val deck = if (target == null) {
+            saved(memory, current) ?: current
         } else {
-            val basePreset = KeyboardPresets.selectable.firstOrNull { it.id == baseId(memory, current) }
-            if (basePreset != null && !basePreset.matches(current)) {
-                next[basePreset.id] = snapshot(current)
-            }
+            current.copy(
+                orderedActions = target.actions,
+                layout = target.layout,
+                modifierBehavior = target.modifierBehavior,
+                hapticFeedbackEnabled = target.hapticFeedbackEnabled,
+                keyRepeatEnabled = target.keyRepeatEnabled,
+                inputMode = target.inputMode,
+                tmuxPrefix = target.tmuxPrefix,
+                defaultLayoutState = if (target.id == KeyboardPresets.general.id) {
+                    KeyboardDefaultInheritance.reset(current).defaultLayoutState
+                } else {
+                    null
+                },
+            )
         }
-        val restored = next[preset.id]?.let { restore(it, current) }
-        val deck = restored ?: current.copy(
-            orderedActions = preset.actions,
-            layout = preset.layout,
-            modifierBehavior = preset.modifierBehavior,
-            hapticFeedbackEnabled = preset.hapticFeedbackEnabled,
-            keyRepeatEnabled = preset.keyRepeatEnabled,
-            inputMode = preset.inputMode,
-            tmuxPrefix = preset.tmuxPrefix,
-            defaultLayoutState = if (preset.id == KeyboardPresets.general.id) {
-                KeyboardDefaultInheritance.reset(current).defaultLayoutState
-            } else {
-                null
-            },
-        )
-        next[BASE_KEY] = preset.id
         return Applied(
-            memory = next,
+            memory = remember(memory, current),
             profile = deck.copy(updatedAtEpochMillis = maxOf(nowEpochMillis, deck.updatedAtEpochMillis)),
         )
     }

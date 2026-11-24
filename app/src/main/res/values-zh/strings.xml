@@ -228,6 +228,7 @@
     <string name="settings_keyboard_preset_vim">Vim</string>
     <string name="settings_keyboard_preset_minimal">精简</string>
     <string name="settings_keyboard_preset_custom">自定义</string>
+    <string name="settings_keyboard_preset_custom_summary">改过的键位保存在这里。切换到其它预设不会丢掉它们，点「自定义」即可恢复。</string>
     <string name="settings_keyboard_replace_hint">点按已配置按键以替换。滑动查看更多按键，或在下方编辑完整布局。</string>
     <string name="settings_keyboard_replace_title">替换 %1$s</string>
     <string name="settings_keyboard_replace_summary">选择此位置的按键或操作。</string>
