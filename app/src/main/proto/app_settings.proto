@@ -74,7 +74,7 @@ message AppSettings {
 
   // Device-local choice of preset per keyboard profile ID. Stored instead of inferred from the deck
   // so an edited preset still reads as that preset.
-  map<string, string> keyboard_profile_presets = 35;
+  map<string, string> keyboard_profile_presets = 37;
 
   // Message presence distinguishes an untouched install from an intentionally empty agent list.
   AiAgentConfiguration ai_agents = 31;
