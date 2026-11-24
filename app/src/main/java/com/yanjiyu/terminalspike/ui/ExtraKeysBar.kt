@@ -861,9 +861,18 @@ private fun BufferedInputPage(
                     modifier = keyModifier.testTag("buffered_input_enter"),
                 )
                 else -> {
-                    val action = KeyboardAction.entries.firstOrNull { it.wireCode == token }?.let { code ->
-                        availableActions.firstOrNull { it.stableId == code.wireCode }
-                            ?: toInputAccessoryAction(code)
+                    val customChord = com.yanjiyu.terminalspike.core.model.InputKeyboardLayout.chordSpec(token)
+                    val action = if (customChord != null) {
+                        TerminalAccessoryAction.TmuxPrefix(
+                            chord = customChord,
+                            stableId = token,
+                            customLabel = customChord,
+                        )
+                    } else {
+                        KeyboardAction.entries.firstOrNull { it.wireCode == token }?.let { code ->
+                            availableActions.firstOrNull { it.stableId == code.wireCode }
+                                ?: toInputAccessoryAction(code)
+                        }
                     }
                     if (action != null) ExtraKeyRow(
                         cells = listOf(action), columnCount = 1, modifiers = modifiers,

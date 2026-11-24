@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Terminal Spike</string>
+    <string name="app_name">Terminal Spike (Fork)</string>
     <string name="ssh_trust_first_contact_title">Trust this SSH host?</string>
     <string name="ssh_trust_first_contact_message">This host has not been seen before. Compare the full SHA-256 fingerprint with the server administrator before continuing.</string>
     <string name="ssh_trust_once">Trust once</string>
@@ -580,6 +580,9 @@
     <string name="settings_input_keyboard_add_left">Add left</string>
     <string name="settings_input_keyboard_add_right">Add right</string>
     <string name="settings_input_keyboard_remove">Remove key</string>
+    <string name="settings_input_keyboard_chord_label">Custom chord</string>
+    <string name="settings_input_keyboard_chord_add">Add chord key</string>
+    <string name="settings_input_keyboard_chord_hint">Use C-j for Ctrl+J, M-Enter for Alt+Enter, or C-[ for Ctrl+[. The key sends exactly that combination to the session.</string>
     <string name="key_import_help">Choose a private key file, including files without an extension, or paste the private key text.</string>
     <string name="key_import_file">Choose a file</string>
     <string name="key_import_paste">Paste private key</string>

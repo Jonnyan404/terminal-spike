@@ -1,293 +1,222 @@
-status: active
-created_at: 2026-08-08T10:42:15.487Z
-updated_at: 2026-11-15
-done_at: none
-independent: yes
-dependencies: none
+# Architecture
 
-# Product architecture
+> The separate-APK packaging described in historical sections is superseded by
+> [ADR-005](ADR-005-BUNDLED-MOSH.md): one app now includes the private Mosh broker and workers.
 
-## Open Questions
+## Compose shell
 
-- None for the main-app implementation. [ADR-005](ADR-005-BUNDLED-MOSH.md) records the accepted one-APK architecture and licensing decision. The separate-package distribution discussion in `docs/mosh-extension-protocol.md` is historical.
+`TerminalSpikeScreen` owns shell routing between exactly Connections, Terminal, and Settings. Connections is the main catalogue for saved hosts, keys, and snippets; Terminal owns active sessions. The Settings destination contains the terminal, keyboard, session, security, backup, Mosh, and About/notices categories. The About surface reads the same canonical third-party notice file that the build packages into each APK's assets. Product-authored UI copy crosses presentation boundaries as resource-backed `UiText`, and Settings landing summaries are projected from committed `SettingsUiState`. Terminal content and scrolling never travel through Compose state. The Activity uses `adjustResize` and the terminal scaffold consumes IME insets so the complete terminal workspace moves above the software keyboard and restores when it closes.
 
-## Goal
+Settings separates Activity/VM wiring (`SettingsDestination.kt`) from navigation and category
+routing (`SettingsScreen.kt`). Appearance, terminal, keyboard, background, and security pages live
+in their own files and reuse module-internal controls in `SettingsComponents.kt`; search and its
+language menu remain in `SettingsSearchUi.kt`. These are application UI boundaries and do not
+change terminal rendering or transport ownership.
 
-Record the implemented production structure for a local-first SSH terminal with a built-in Mosh transport. The bounded VT engine and custom Android Canvas renderer remain intact while product data, credentials, navigation, and live session ownership use process-durable boundaries.
+Snippet component and Connections screen tests use `IsolatedPreferencesRule` to redirect toolbar or connection-order preference lookups into a UUID-backed fixture. The rule wraps the Compose lifetime, flushes pending writes after disposal, and deletes that fixture. These tests do not clear the application's real toolbar or connection-order preferences.
 
-`docs/ARCHITECTURE.md` is the concise implemented overview. This lowercase document is authoritative for the detailed production and migration boundaries requested by the completion brief.
+Snippet editing and key renaming freeze every draft-changing control while persistence is pending. A successful save dismisses the dialog; a failed save keeps the submitted draft and restores editing for retry.
 
-## Module boundaries
+Nearby SSH discovery retires each search or resolution callback generation when it ends, before stopping the platform boundary. Callbacks whose generation is already retired are ignored. Controller tests cover stable timeout, failure, dismissed-picker and selected-endpoint state. The main-thread-owned Android adapter dispatches every framework discovery and resolution callback through its main executor, then checks listener identity at execution time. Retired listeners, queued callbacks after stop/restart/close, and duplicate resolution completions cannot update its cache or notify a retired owner. A synchronous platform exception retires the partially started listener before propagating the error. Its service cache shares the controller's 32-candidate limit, with normalized SSH service-type identity; AndroidNsdPlatform contains only SDK-specific calls. Instrumented boundary tests use real framework service-info objects and the main Looper with recorded platform calls; they do not exercise actual mDNS browsing or the API 37 picker. An in-app search can retain its final results for explicit selection; duplicate selection while resolving and selection after completion are ignored. Starting another search retires the previous resolution and requests boundary cancellation; the adapter path below API 34 retires its listener without relying on a platform resolution-cancellation method or extension version. The system picker still resolves its first selected service automatically.
 
-The project stays package-oriented inside the main `app` module until a boundary changes packaging, licensing, or testability enough to justify extraction.
+## Native renderer
 
-```text
-app (com.yanjiyu.terminalspike)
-├── app                    Application, activity, service, notifications, assembly
-├── core/model             Stable UUID models and enums; no Android dependencies
-├── core/data              Room database, DAOs, migrations, global settings, repositories
-├── core/security          CredentialStore, Keystore crypto, backup crypto, redaction
-├── connection             JSch/Mosh adapters, trust, connection tests, sessions/reconnect
-├── terminal               VT engine, buffers, viewport, selection, renderer and input
-└── ui                     Compose navigation, screens, immutable UI state and ViewModels
+`TerminalViewBridge` is the isolation boundary around `FastTerminalView`. The View draws only calculated visible rows plus two overscan rows using a hardware-accelerated `Canvas`, cached `Paint` metrics, and cached monospace typefaces. It owns touch scrolling, `OverScroller` flings, focus, cursor drawing, keyboard entry, and pixel scroll position through the retained viewport. Engine dirty rows are coalesced through `TerminalController` and invalidate exact visible row rectangles; viewport, selection, cursor-geometry, theme, typeface, resize, alternate-screen, and trim changes still force a full invalidation. During IME animation the View updates local geometry immediately but debounces the remote PTY resize until the dimensions settle.
 
-mosh-api (com.yanjiyu.terminalspike.mosh.api)
-└── permissive AIDL, parcelables, capabilities and error codes only
+The View is intentionally not a `RecyclerView`, `SurfaceView`, `WebView`, Compose `Text`, or `LazyColumn`. No bitmap of the complete scrollback is retained.
 
-mosh-core (com.yanjiyu.terminalspike.mosh)
-└── internal Android library, private broker/worker processes, JNI client and GPL materials
-```
+Touch routing is profile-driven and latched per gesture. In Auto, a confirmed app-selected tmux
+session reserves classified vertical scrolling for Android's local pixel viewport; pending history
+buffers that gesture instead of falling back to a remote wheel. A pre-existing tmux copy mode is
+left active but is neither driven nor exited. Explicit Remote mouse is the intentional route to a
+mouse-aware inner application or tmux copy mode, and its optional two-finger override remains
+local. Taps, long-press selection, and link actions do not enter the vertical-scroll router.
 
-The GPL-3.0-or-later main APK includes `mosh-core` under ADR-005. `mosh-api` remains the small
-Apache-2.0 contract between its private processes. Only the main process initializes `AppContainer`.
+## Terminal model
 
-### Implemented Mosh slice
+`TerminalBuffer` is an Android-independent bounded ring: the debug benchmark uses 100,000 lines and remote runtimes use 20,000. Appending over capacity replaces one slot and moves the head; it never copies the complete buffer. IDs are assigned monotonically and are not reused after clear. A `TerminalLine` contains sanitized Unicode and contiguous `TerminalRun` values. `TerminalStyle` represents foreground, background, bold, italic, underline, and inverse attributes.
 
-The optional transport now follows these concrete boundaries:
+`TerminalViewport` is also platform-independent. It calculates pixel bounds and visible rows, switches auto-follow only at the exact bottom tolerance, and compensates the scroll coordinate when old stable line IDs are trimmed.
 
-1. The main app discovers only its exact private broker component, requires the same application UID and the dedicated broker process, and negotiates API version and capabilities. An exported or mismatched service is rejected.
-2. The existing strict JSch path resolves the authenticated TCP peer, verifies the host key, authenticates with a password or imported private key, and runs one safely quoted `mosh-server` bootstrap command.
-3. A bounded parser accepts exactly one official `MOSH CONNECT` response. The main app gives the private broker a numeric address, UDP port, dimensions, locale, reviewed flags, and a one-shot key PFD; it never sends the SSH credential or known-host state.
-4. `MoshConnection` adapts the built-in transport to the same `Connection`/terminal-controller boundary as SSH. Binder carries bounded control/state only; terminal input and output use PFD streams with bounded writer backpressure and coalesced resize.
-5. The private Mosh broker assigns each session to one of ten private worker processes. Each worker owns one pinned upstream Mosh 1.4.0 transport/terminal engine compiled for `arm64-v8a` or `x86_64`, avoiding unsupported cross-session sharing of upstream process globals.
-6. Settings observes the real built-in transport client and shows its discovery/trust/API/capability state. When Mosh is unavailable, saved profiles remain intact and SSH stays available as an explicit manual fallback.
+Before terminal-program messages or task titles enter Android notifications,
+`sanitizeUntrustedDisplayText` removes controls and Unicode format characters by code point,
+collapses whitespace, and bounds the output while constructing it. Its UTF-16 limit preserves
+complete surrogate pairs; malformed surrogate code units become replacement characters. This
+normalization does not alter renderer text, selection contents, or terminal byte flow.
 
-This slice is implemented and buildable. Earlier controlled-server evidence on the exact
-model-checked old `SM-S911B` completed password and private-key SSH bootstrap, real UDP terminal
-I/O, four simultaneous sessions, independent resize/close, isolated-worker death with slot reuse,
-and broker death with automatic client rebind and fresh traffic. The application-owned session
-repository publishes bounded Android connectivity generations to live Mosh sessions, and a
-disposable-AVD gate covers SSH with Mosh unavailable. Observed network-transition/roaming acceptance and
-the user's external server remain open. The host model still cannot represent link-local IPv6 zone
-identifiers; the native Mosh protocol retains its authenticated UDP roaming and port-hopping
-behavior.
+Optional terminal clipboard clearing uses an opaque, app-assigned token, so an older copy cannot
+clear a newer identical value. `TerminalClipboardClearScheduler` validates its generation after
+dispatching to the main thread and serializes that check, the exact-token platform operation and
+consumption. Disabling/changing the delay, replacing a scheduled write, or closing the scheduler
+invalidates queued clears. An unavailable foreground owner retains the expired token for a later
+resumed/focused Activity; completed or superseded tokens are consumed once.
 
-## Runtime ownership
+## Input and sessions
 
-```text
-Compose screen / ViewModel
-        │ commands + immutable StateFlow snapshots
-        ▼
-AppContainer.SshSessionRepository ── application-process scope
-        │
-        ├── foreground-start gate ── SessionForegroundService
-        │                              └── ongoing private notification/actions
-        ├── SSH SessionRuntime ── JSch ── remote SSH server
-        │       └── VtTerminalEngine → TerminalController → FastTerminalView
-        │
-        └── Mosh SessionRuntime ── explicit verified Binder ── private Mosh broker process
-                └── PFD input/output pipes → same terminal engine/controller
-```
-
-The application-owned repository owns transports, parser instances, controllers, session metadata, retry jobs, connectivity observation, and the Mosh binding. `SessionForegroundService` observes that same repository, owns the foreground notification and optional CPU-awake lease, handles notification actions, and fails active sessions if its required service lifetime is lost. Activities and ViewModels own presentation state and short-lived commands only. Neither a screen nor navigation owns a raw socket.
-
-The ownership cutover is implemented for SSH and Mosh. Activity or ViewModel recreation reattaches to process-owned snapshots and controllers; it does not recreate or own the connection. A disposable API 35 external gate now proves real SSH across ordinary backgrounding, reversible deep-idle/standby/data-saver pressure, exact app-PID death, honest empty-session restart state, clean service/notification teardown, retained non-secret host/recent metadata, session-only password re-prompt, and a fresh real SSH shell. OEM battery modes, long soak, and multi-device walkthroughs remain acceptance gaps rather than ownership defects.
-
-The service starts only after a visible, user-initiated connect action. It stops when no session is connecting, connected, reconnecting, or awaiting an explicit trust/authentication decision. Activity recreation reattaches to repository state. Process death does not preserve or claim to preserve live SSH/Mosh sockets; the external gate proves the old PID, service, and notification disappear, then persisted recent-session and saved-host metadata offer an honest password-prompted reconnect in a distinct process.
-
-## Foreground-service decision
-
-The current target SDK is 37. An active remote terminal does not truthfully fit media, remote messaging, connected-device, or data-sync categories. Use `specialUse` with:
-
-- `android.permission.FOREGROUND_SERVICE`;
-- `android.permission.FOREGROUND_SERVICE_SPECIAL_USE`;
-- `android:foregroundServiceType="specialUse"`;
-- `android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE` value: `active user-started terminal sessions and local Linux installation`.
-
-The service is started while the app is visible and immediately posts its notification. The Play Console declaration must describe why deferral or interruption breaks the explicitly user-visible terminal connection and include the required demonstration. This follows the current official [Android service-type guidance](https://developer.android.com/develop/background-work/services/fgs/service-types), [manifest guidance](https://developer.android.com/develop/background-work/services/fgs/declare), and [Play declaration requirements](https://support.google.com/googleplay/android-developer/answer/13392821).
-
-Notification denial never causes a hidden session. The app explains the platform limitation, handles start/notification failures, and either keeps the connection only while legally permitted or disconnects safely. It never mislabels the service to evade policy.
-
-## Navigation and adaptive layout
-
-Phones expose exactly three primary destinations:
-
-1. Connections
-2. Terminal
-3. Settings
-
-Connections is the first bottom destination and owns saved hosts, keys, and snippets. Terminal is the second destination and owns active sessions. Back first lets the IME hide when appropriate; leaving terminal detail keeps every session active; disconnect is explicit. Predictive back animates toward the owning surface without binding transport lifetime to the transition.
-
-Compact width uses Material `NavigationBar`. Expanded width uses `NavigationRail`; Connections can show list/detail. Terminal detail consumes all additional width rather than retaining a phone-width column. Every shell handles status/navigation/IME/cut-out insets edge to edge.
-
-## UI state and dependency assembly
-
-- Repositories and service clients expose `StateFlow` of immutable models.
-- ViewModels map domain models into screen-specific immutable UI state. Product-authored copy uses resource-backed `UiText`; dynamic text is reserved for bounded user/provider/runtime data.
-- Decrypted credentials are requested just in time through opaque credential references and never enter UI state, saved state, routes, or navigation arguments.
-- Constructor injection is implemented with a small application-owned container. No heavy DI framework is added.
-- `TerminalSpikeApplication` creates one `AppContainer` in the main application process; that container
-  owns the singleton Room database, Proto DataStore repository, application coroutine scope, and logger.
-  Private Mosh broker/worker processes skip this initialization.
-- All production components receive clocks, ID generators, dispatchers, stores, and transport factories through constructors where determinism/security testing benefits.
-- User-visible strings are resources. A reviewed direct-literal allow-list and Spanish non-default-locale smoke cover the release UI boundary; manual language/accessibility matrices remain separate. Terminal cells, lines, scroll offsets, selection internals, and byte flow do not become Compose state.
-
-### Settings source boundaries
-
-| File | Responsibility |
-|---|---|
-| `ui/settings/SettingsDestination.kt` | ViewModel observation, action wiring, document launchers, clipboard callback |
-| `ui/settings/SettingsScreen.kt` | Adaptive navigation, category selection, detail routing, retained category reading position |
-| `ui/settings/SettingsAppearance.kt` | Fonts, terminal palette selection, appearance preview and sliders |
-| `ui/settings/SettingsTerminal.kt` | Terminal link, clipboard, paste and reset controls |
-| `ui/settings/SettingsKeyboard.kt` | Accessory deck selection, replacement, reordering and editor dialogs |
-| `ui/settings/SettingsBackground.kt` | Session/background and notification controls, public system-settings intents and health |
-| `ui/settings/SettingsSecurity.kt` | App lock, screenshot/clipboard protection, known hosts and confirmed credential clearing |
-| `ui/settings/SettingsComponents.kt` | Shared module-internal headings, choices, switches, read-only rows and reset dialog |
-| `ui/settings/SettingsSearchUi.kt` | Localized search results, anchored options, search header and language selection |
-
-These files retain the same callbacks and UI state; only cross-file entry points become module
-internal. No per-cell or per-line state enters Compose. Custom theme colour input accepts exactly
-six ASCII hexadecimal digits after `#`, ignoring outer whitespace; signed values and non-ASCII
-numerals remain invalid and cannot become a saved colour.
-
-## Product data
-
-Room 2.8.4 owns relational non-secret data:
-
-- host profiles;
-- credential metadata/references;
-- SSH key public metadata;
-- known hosts;
-- snippets;
-- terminal profiles and custom palettes/font references;
-- keyboard profiles and ordered keys;
-- recent-session metadata and favourites/tags.
-
-Foreign keys are explicit and nullable only where the UI can represent “missing reference.” Stable UUID strings are generated at creation and retained across merge/restore. Created/updated/first-seen/last-seen timestamps are epoch milliseconds supplied by an injected clock. Exported Room schemas and explicit migration tests are committed. Destructive fallback is prohibited.
-
-Room schema version 6 retains canonical lowercase UUID `TEXT` catalog IDs and stable string wire codes rather than Kotlin enum names. Its thirteen tables include a device-local integer-keyed toolbar singleton:
-
-The checked-in version 1 and version 2 exports are deliberately identical pre-release
-checkpoints: the privacy-safe Recent token and Mosh locale/fallback columns were already present
-when the first Room schema was captured, so the registered 1→2 migration is a tested no-op rather
-than a fabricated field history. Version 2→3 is the first structural Room migration and adds custom
-themes plus terminal-profile rendering flags. Version 3→4 adds `host_profiles.port_forwards` as non-null `TEXT` with an empty-string default, preserving existing hosts without forwarding rules. No public or production-signed version 1 artifact
-exists; future migrations must preserve these exports without rewriting that history. Version 4→5
-adds nullable `keyboard_profiles.default_layout_state`, retaining per-slot default-keyboard
-ownership without inventing a baseline for an existing custom layout. Version 5→6 adds `snippet_toolbar_state`, atomically joining a saved default-snippet replacement to its local hidden-default set. The migration and fresh-database callback import old toolbar hiding preferences once; an existing singleton, including an empty set, prevents reimport. Toolbar order and expansion preferences stay in their original file. This table has no foreign key to snippets: deleting a replacement keeps its default hidden.
-
-| Table | Purpose and key columns |
-|---|---|
-| `terminal_profiles` | Theme/font/size/geometry/cursor/scrollback/bell/scroll/link/TERM/alternate-history plus timestamps |
-| `custom_terminal_themes` | UUID-backed default/ANSI/cursor/selection colours, bold-as-bright policy, and timestamps |
-| `keyboard_profiles` | Name, row count, modifier policy, haptic/repeat, input mode, tmux prefix, default-layout ownership state, timestamps |
-| `keyboard_profile_keys` | `(profile_id, position)` primary key, stable action code, unique action per profile; cascade on profile deletion |
-| `encrypted_secrets` | Kind, envelope/key version, nonce, ciphertext, READY/LEGACY_UNAVAILABLE state, stable failure code/legacy ID, timestamps; accessible only through `CredentialStore` |
-| `ssh_key_identities` | Public metadata/key/fingerprint/provenance/passphrase flag/comment and private-secret reference |
-| `ssh_credentials` | Password/private-key/keyboard-interactive kind and kind-valid secret/key references |
-| `host_profiles` | Complete host model, optional credential/terminal/keyboard references and per-host SSH/Mosh overrides |
-| `recent_sessions` | Display-safe host snapshot/reference, protocol/state, start/activity/end timestamps, and sanitized optional terminal title |
-| `known_hosts` | Canonical host, port, algorithm, fingerprint, public key, first/last seen; unique host+port+algorithm |
-| `snippets` | Name/group/command/insert-or-send/append-Enter/multiline-confirm/favourite/update time |
-| `snippet_toolbar_state` | Singleton `singleton_id=0` integer PK; bounded canonical `hidden_default_ids` TEXT; device-local, excluded from portable backup |
-| `legacy_migration_state` | Per-source digest/version/state/error/warnings/completion so settings and known hosts migrate independently |
-
-`encrypted_secrets` stores only authenticated ciphertext/nonce; plaintext never enters SQLite or its WAL. Crypto runs before a transaction, then secret plus referencing metadata commit atomically. Host credential/profile references use `SET NULL`, referenced identities use `RESTRICT`, and ordered keyboard children use `CASCADE`. Repository validation enforces bounded strings/blobs and kind-dependent combinations that are awkward as SQL constraints. UI observes aggregate repository `Flow`s rather than secret DAOs.
-
-Proto DataStore 1.2.1 owns typed global preferences through a checked-in protobuf schema and explicit migrations: appearance, default terminal/keyboard profile, global keepalive/reconnect, background/notification, security, and backup UX state. It holds no credential payload, imported private key, transcript, Mosh key, or complete connection URI.
-
-### Legacy migration
-
-The existing encrypted `UserSettingsCodec` v1–v3 file, password files, private-key files, and OpenSSH known-host file are inputs to a one-time idempotent migration:
-
-1. Check the source's terminal Room marker before opening retained input.
-2. Read/decrypt bounded legacy input using existing keys, without modifying its files or aliases.
-3. Validate records and derive UUIDv5 identifiers from committed namespace
-   `4b15d1d9-31d7-4d0e-9ea9-bd041f34fb72` and exact type/legacy-ID names; new records use UUIDv4.
-4. Re-encrypt each available secret through `CredentialStore` under UUID identifiers and reopen
-   the new envelope in memory before any Room commit. Scope and wipe legacy plaintext.
-5. Commit ciphertext, metadata, references, defaults, and the source's completion marker together
-   using `INSERT(ABORT)` in one Room transaction, with the marker written last. Proto DataStore
-   remains a separate global-preference authority; this migration does not write global settings.
-6. Preserve an unavailable individual secret as a referenced recovery row. Block an unreadable or
-   target-incompatible aggregate. Retain source files and aliases in either case.
-7. On restart, terminal markers prevent re-import; blocked attempts remain retryable. Deterministic
-   IDs and abort-on-conflict writes prevent silently overwriting authoritative data.
-
-Historical writers/read-write compatibility stores are test fixtures, not production services.
-`SecureUserSettingsStore`, `SecureSshPasswordStore`, `SecureSshIdentityStore`, and the historical
-credential-recovery exception types live under `app/src/androidTest/`. Existing round-trip,
-missing-key, tamper, AAD, and migration tests retain those fixtures and test identities. Production
-keeps only the read-only migration path, its byte limits, `SettingsLoadResult`/`SettingsLoadFailure`,
-and `SshPasswordScope`. No persisted format, database schema, key alias, or source file is changed
-by this source-set move.
-
-The importer does not call the compatibility settings load path. It uses an existing-key-only legacy reader returning typed Missing/Key unavailable/Corrupt/Unsupported results. It decrypts passwords with the exact stored legacy host/port/username AAD and private keys with legacy ID AAD, then re-encrypts under immutable secret UUID+kind AAD. An unavailable individual secret becomes a referenced `LEGACY_UNAVAILABLE` row while source ciphertext/key are retained; an unreadable aggregate records BLOCKED and exposes recovery rather than silently starting empty.
-
-All rows plus the terminal marker use `INSERT(ABORT)` in one transaction. A missing settings source
-seeds the fixed default terminal and keyboard profiles and records `ABSENT` in that same
-transaction; a missing known-host source records an empty `ABSENT` marker. An explicitly confirmed
-recovery reset replaces a blocked source with `DISCARDED_AFTER_RECOVERY`. `COMPLETE`, `ABSENT`, and
-`DISCARDED_AFTER_RECOVERY` are authoritative before any retained source is opened, so a file that
-appears or changes later cannot resurrect data. Known hosts migrate independently, parse
-`[host]:port` or default port 22, retain the current last-valid-duplicate behavior, and record
-malformed lines as warnings. Old files and aliases remain in place as retained recovery inputs; the
-terminal Room marker, rather than file deletion, prevents re-import.
-
-The application container owns one explicit, single-flight migration entry point. The production
-Room-consumer cutover starts and awaits it before catalog reads, writes, deletion, and recovery-reset
-paths proceed. An application-wide authority gate also serializes pending Replace recovery against
-normal mutations. This prevents retained legacy files or a stale cached catalogue from resurrecting
-data that the user changed or explicitly removed.
-
-Settings UI writes and the shipped-keyboard repair use `SettingsMutationCoordinator`, owned by
-`AppContainer`, with this same authority gate. Profile reads used to construct a change and every
-durable write stay inside one mutation interval. `SettingsMutationScope.write` finishes an accepted
-write and its generation publication despite cancellation. It advances the generation immediately
-after the first successful durable write, so `TerminalDataRepository` reloads an older catalog even
-if the next store fails. The scope rejects writes after release and does not make Room/DataStore
-changes atomic. Settings state uses atomic flow updates; font enumeration stays on the I/O path
-and inside the startup error boundary.
-
-The cutover closes the historical identity-ID collision, hostname-case/AAD mismatch, destructive settings reset, and incomplete `AtomicFile` recovery risks catalogued in `docs/current-state-audit.md`.
-
-`connection/MoshSshSideChannel.kt` isolates the lifetime of the bootstrap SSH companion and fresh
-connections used for attachments or explicit project operations. `MoshBootstrap` constructs it;
-`MoshBootstrapResult` retains it for the Mosh attempt. Registered authentication leases leave the
-tracking set before close is attempted. Nested `use` scopes attempt both distinct handles and
-preserve operation and factory errors when cleanup also fails. Closing
-the helper still closes the original SSH companion. This does not change terminal/history exec
-routing or remote workspace retry policy.
-
-## Terminal boundary
-
-`VtTerminalEngine` remains Android-independent and bounded. Transport byte reads and parser work run off the main thread. Completed scrollback and immutable screen changes enter `TerminalController`, which coalesces work to display frames. `FastTerminalView` draws calculated visible rows plus overscan using cached metrics and Paint objects.
-
-Required invariants:
-
-- no Compose node or state per terminal cell or line;
-- no parser publication per received byte;
-- bounded normal/alternate history, queues, CSI/OSC strings, replies, selection, transcript, and paste;
-- no disk/network I/O on the main thread;
-- invisible sessions parse transport state but do not render at full frame frequency;
-- font/theme changes invalidate cached renderer metrics once, not screen state per cell;
-- resize/IME/fold changes settle PTY size without repeated redraw storms.
-
-## SSH boundary
-
-The current JSch engine remains. `JschSshConnection` owns DNS/TCP/negotiation/auth/channel work, `KnownHostManager` owns strict trust decisions backed by Room, and the application-owned `SshSessionRepository` owns connectivity-aware bounded retries. A staged connection test uses the same trust/authentication path but does not run saved startup input or leave a shell running.
-
-First contact supports trust once or trust and save. Any presented key for a previously trusted host/port that does not match an explicitly stored key blocks, including algorithm changes. Key replacement is a separate confirmed management action showing old and new fingerprints.
-
-Keepalives use the SSH protocol, not shell characters. Reconnect creates a new shell and is labelled as such. Intentional disconnect cancels retry. Errors have a concise typed summary plus optional redacted technical detail.
-
-## Backup boundary
-
-Backup serializes a repository snapshot, never Room/Datastore files directly. Import authenticates and parses a bounded stream before preview. The repository applies Merge/Replace/Keep-both in one transaction; Replace first creates a device-encrypted recovery snapshot. Details are normative in `docs/backup-format.md`.
-
-## Release/debug boundary
-
-Renderer workloads, performance overlays, fake Mosh services, test hosts, verbose protocol capture, and developer menus live under debug-only sources or a `BuildConfig.DEBUG` route that release cannot reach or retain. Release verification inspects the shrunk artifact for old debug labels/routes and checks the runtime dependency graph.
-
-## Verification
-
-- Room schema and every migration path, including legacy import and rollback.
-- Service ownership across Activity recreation/navigation and honest process-death behavior.
-- Notification permission denied, service-start restriction, action, privacy, and teardown behavior.
-- Single-APK build/install and SSH with the Mosh broker unavailable.
-- Both native ABIs and notices in the main APK/AAB; private same-UID broker/worker services; verified negotiation, strict bootstrap, real UDP terminal I/O/resize, explicit SSH fallback, and teardown on worker/broker death.
-- Core Mosh roaming across IPv4/global-IPv6/VPN changes; Android connectivity-hint publication is implemented, while real transition/roaming evidence remains open and link-local IPv6 zone IDs are out of scope for the current host model.
-- Renderer/parser/buffer/viewport/batching/workload regression suites.
-- Compact/expanded/large-text/IME/multi-window behavior.
-- Full commands and exact-device installation gates in `IMPLEMENTATION_STATUS.md`.
+`AppContainer.sshSessionRepository` is the application-process owner of every live SSH and Mosh connection, parser, controller, retry job, and bounded 20,000-line remote buffer. Activities and ViewModels observe immutable snapshots and issue commands; their lifecycle does not own a transport. A visible user action must promote `SessionForegroundService` before transport startup. The service observes the same repository for the ongoing privacy-aware notification, CPU-awake policy, actions, and fail-closed service loss. Release UI hides the debug-only 100,000-line benchmark workload and shows an explicit no-session state instead. The app does not impose a fixed remote-runtime count; transports may still enforce their own advertised capacity, including the built-in Mosh broker.
+
+`TerminalInputConnection` sends committed UTF-8 immediately, maps deletion to DEL, handles common terminal keys, and advertises a direct-input visible-password editor with suggestions disabled. A two-page Compose strip keeps the shortcut deck as the default and offers a separate bounded `TextFieldValue` editor with ordinary IME composition, correction, and selection. Its explicit Send action uses the active controller's bracketed-paste-aware path without adding Enter, requires an extra confirmation for multiline drafts, clears only after dispatch, and hands focus back to the native View when the user returns to direct input. Hardware keys and the Compose extra-key toolbar also enter through the active controller's byte sink. Terminal size changes are derived from cached native-renderer cell geometry and propagated without Compose terminal-content state.
+
+Accessory byte dispatches own their returned arrays: the ViewModel wipes them after sending,
+including rejected sends. Shift+Tab and configured control prefixes therefore copy shared key
+constants before dispatch. This ownership rule does not change the chord syntax or terminal
+byte sequences. `BufferedInputDraftState.kt` owns the existing draft, recovery copy, persistence
+callback and send-eligibility helpers; `ExtraKeysBar.kt` handles their UI composition.
+
+IME-sent Ctrl/Alt/Meta key-down events cancel staged composition through the same boundary as native hardware input. A late commit of that cancelled value is suppressed, while a new composing value is accepted normally. Key-up events leave pending composition intact.
+
+Both direct and buffered input advertise `*/*` rich content. The image button opens the system photo picker showing recent images and videos by default, without the old app-defined 20-item cap; the system photo picker may impose its own selection limit. Long-pressing that same button opens Android's multiple-document picker with `*/*` for arbitrary files, without an app-defined selection count, file-size or format limit. Picker files, clipboard URI items (including videos and documents), and IME rich content share the same streaming pipeline. Up to four IO workers transfer files concurrently without loading whole files into memory, and paths are inserted in selection order. Failed files do not discard successful files; temporary IME grants are released on completion or cancellation. SSH and Mosh use independent SFTP channels on the authenticated SSH transport and store files in the host's private `~/.cache/terminal-spike/pasted-images` directory. Mosh can reopen its upload side channel with reloadable credentials if the bootstrap TCP connection has expired. Local Arch imports files into `/root/.cache/terminal-spike/pasted-images` under an installation lease; the local renderer demo stores files in app-private storage and inserts that path (it has no shell to consume attachments). File bytes never enter the renderer or terminal byte stream; the receiving tool decides what a pasted path means. System document-provider access, available storage and receiving-tool limits still apply. Buffered drafts and text clipboard paste have no app-defined character cap; local PTY writes split large pastes into native-sized frames.
+
+`transferTerminalAttachments` alone closes each original provider stream. Its cancellation-aware
+wrapper is a non-closing loan to nested session/SFTP transports, so their `use` blocks cannot
+close the provider prematurely or repeatedly. Healthy and freshly authenticated Mosh uploads use
+the same borrowed-stream boundary. Success, failure, and cancellation release the provider and
+its temporary grant at the outer pipeline boundary.
+
+## File browser
+
+`SftpSessionController` owns an independent SFTP client and publishes immutable browsing state.
+Blocking directory listings always run on its injected operation context, including the refresh
+following an upload initiated by the UI. Transfer completion, failure, and cancellation release the
+busy state only while the same client and generation still own the operation. A cancelled older
+transfer cannot overwrite a newly connected host or reopen a closed file browser.
+Multi-file upload metadata is also read inside this transfer boundary on the operation context:
+provider failures become browsing errors, and cancellation releases busy state without becoming
+a reported transfer failure.
+
+## SSH transport
+
+`TmuxCommandRunner.kt` owns the JSch exec adapter, limits and stream handling; the selector keeps catalog, startup and capture policy. Its monotonic elapsed-time budget covers setup, connection and reads, including discarded stderr, and checks interruption between reads. Connect and poll waits are capped by the remaining budget with millisecond rounding; a sub-millisecond remainder never becomes JSch's unlimited zero timeout. The stdout caps remain 64 KiB for ordinary commands and 16 MiB for history capture, with unchanged 5/30-second total limits; stderr does not consume the retained stdout quota. Partial stream-acquisition failures close acquired streams and disconnect the owned channel. Scratch bytes are wiped, and a disconnect failure is suppressed beneath the original execution failure. Successful stdout bytes, exit status, capture commands, history ownership and gesture routing are unchanged. These are transport resource/deadline checks, not new physical tmux/Codex scroll acceptance.
+
+`RemoteSessionModels.kt` holds the existing request, snapshot, foreground and result contracts.
+`RemoteSessionReliability.kt` owns the pure reconnect policy: each online attempt doubles the
+delay exactly until its configured ceiling, including odd ceilings and the full positive Long
+range. It saturates before multiplication can overflow and stops doubling at the ceiling;
+offline waits and intentional disconnects retain their existing retry-budget behavior.
+
+`RemoteSessionMetadata.kt` reuses the code-point-aware display sanitizer for session labels and
+terminal titles before publishing snapshots or Recent records. Labels retain their 96-unit
+UTF-16 limit and control-removal policy; titles retain their 128-unit limit and whitespace
+normalization. Both preserve complete surrogate pairs and remove supplementary format
+characters. The existing hostname/username title checks run after this normalization, so a
+format character cannot split a matching endpoint fragment. Renderer content and transport
+bytes do not pass through these metadata helpers.
+
+`Connection` is the transport-neutral lifecycle/input/resize boundary. Transport-specific configuration is owned by the implementation rather than exposed by the interface. `JschSshConnection` is the first implementation and runs blocking network reads away from the main thread. Outgoing keyboard data uses a bounded 256-item single-writer queue so a slow connection cannot block the UI or grow without limit. Result-bearing sends reject a full or stopped queue; legacy direct sends turn rejection into one terminal failure state instead of silently dropping bytes. Writer, reader, EOF, connect, and explicit-close races publish exactly one terminal state. A snippet plus its optional Enter is offered as one batch, so it cannot be split by queue pressure. Sessions use connect/channel timeouts, SSH keepalives, and the selected/default profile's validated `TERM` value for PTY negotiation. A saved startup command is user-authored shell input: it is UTF-8 encoded and queued once, with one terminal Enter, only after each fresh interactive shell reaches Connected. Reconnect and duplicate each create a fresh shell and therefore dispatch their own one-shot input; Test Connection opens the selected PTY but explicitly does not run saved startup input. Password, passphrase, keyboard-interactive response, and queued input byte arrays stay within their bounded owners and are wiped on terminal paths.
+
+For Mosh, terminal bytes and lifecycle events arrive on separate PFD and Binder paths. After a
+terminal-pipe EOF, the connection waits at most one second for an already-concurrent authoritative
+terminal callback so isolated-worker or broker death cannot be mislabeled as a clean disconnect.
+An eventless EOF still resolves to `Disconnected`; explicit close remains immediate and idempotent.
+
+`AndroidMoshExtensionClient.startSession` owns the transferred key descriptor from method entry,
+even if cancellation prevents IO dispatch. It closes the key before returning from IO. If prompt
+cancellation discards a successful handle on the caller's dispatcher, the client closes both terminal
+pipes and stops only that session under non-cancellable cleanup; delivered handles remain caller-owned.
+Cancelling an accepted service binding while awaiting its callback unbinds that candidate so a later
+connect can acquire a fresh binding.
+The outer `AndroidMoshConnectionExtension` applies the same ownership boundary to its session-key
+array and constructed terminal transport: it wipes keys even before IO dispatch and closes/stops a
+transport discarded on return. Cleanup never shuts down the process-wide client or another session.
+
+Each native worker owns transferred descriptors from admission through one identity-checked
+finalizer. Stops, callback death, destruction and rejected scheduling dispose queued sessions,
+unlink their callback and prevent old tasks from completing a replacement session. The default
+executor has one worker and one waiting slot; cancellation removes its queued task before the
+slot can be reused. Once native work starts, Java retains its descriptors until JNI returns.
+JNI rechecks the worker's cancellation flag after registering native control, covering stops that
+arrive before registration; a failing check clears its exception and releases native control.
+
+JSch resolves standard authentication, key-exchange, cipher, MAC, hash, signature, compression, and key-decoding implementations from class-name strings. Release R8 rules preserve the supported standard-JCA implementation seam while leaving unbundled Bouncy Castle and GSSAPI integrations shrinkable. The release packaging verifier derives the covered classes from the resolved pinned JSch JAR, requires every one to retain its original mapping name, and verifies the canonical legal notice asset byte-for-byte before `assembleRelease` succeeds.
+
+`KnownHostManager` never accepts a key silently. A new host pauses before authentication and exposes its SHA-256 fingerprint for Reject, Trust once, or Trust and save. Saved trust is committed through the process-singleton Room store, and the post-confirmation transaction rechecks host identity so concurrent first-contact decisions cannot overwrite one another. Any non-matching key for a known host—including an algorithm change—is a hard failure; replacement or removal is a separate confirmed Security action. The retained OpenSSH-style file is a legacy migration input, not the production trust authority.
+
+File-backed trust writers and adapters live only in `app/src/sharedTest/java`, shared by JVM and Android transport tests through `fileKnownHostManager`. SSH and SFTP transport constructors take the assembled trust manager rather than a file supplier. The retained-file migration reader and parser remain in production.
+
+`VtTerminalEngine` is an Android-independent, bounded screen engine selected by ADR-002. It incrementally decodes UTF-8 and owns primary/alternate cell grids, cursor and saved state, scroll margins, common CSI/DEC modes, SGR/256/true-colour styles, bracketed paste/application-cursor/focus/mouse modes, and bounded CSI/OSC recovery. Only immutable visible-row snapshots and completed scrollback lines cross into `TerminalController`; terminal cells never become Compose state. Primary and alternate history use separate bounded buffers so tmux-style output can be scrolled without polluting the shell transcript. Device/status queries return bounded response bytes through the active connection.
+
+Each parser cell retains at most 4,096 UTF-16 units, including its base character. Crossing that limit replaces the entire cell with U+FFFD, padded with one space when the cell occupies two columns. The discarded cell text is no longer available for copying or history. Smaller cells remain exact, including complete surrogate pairs. A constant-size logical tail retains ZWJ and regional-indicator pairing state independently of the replacement, so discarded text cannot swallow following ordinary cells or change their columns. Further discarded tail updates do not invalidate an unchanged row snapshot. This per-cell storage/work bound is separate from row-count limits and the renderer's smaller shaping limit; it is not a global heap or end-to-end performance guarantee.
+
+Completed OSC payloads are validated by Unicode code point before dispatch, after their
+bounded incremental parse. Controls, format characters (including supplementary-plane
+characters), replacement characters and malformed UTF-16 are rejected as a whole; visible
+international text remains intact. `TerminalLinkPolicy` reuses that validation before its
+existing whitespace, absolute-host and scheme checks. Display normalization remains a
+separate policy; renderer text and the OSC 52 decoded-clipboard rules are unchanged.
+
+## Local data and encryption
+
+Room schema v6 is the relational authority for host, credential metadata, key identity, known-host, snippet, terminal/custom-theme, keyboard, and recent-session data. Proto DataStore owns typed global preferences. `AppContainer` provides one process-wide database, repository set, authority gate, and application I/O scope; startup migration and destructive backup recovery must resolve before catalog mutation. Legacy encrypted settings, password, private-key, and known-host files are retained as read-only migration/recovery inputs and cannot silently repopulate authoritative Room state.
+
+`SettingsViewModel` routes global preferences, terminal/keyboard profiles, custom themes, imported
+fonts and its one-time shipped-keyboard repair through the process-singleton
+`SettingsMutationCoordinator`. It awaits recovery and migration readiness and holds the same
+`AuthoritativeDataGate` as backup apply/rollback. A successful first durable write advances the
+catalog generation even if a later store fails; subsequent writes in that operation share that
+generation. Each started write finishes commit bookkeeping despite UI cancellation, while a
+cancelled operation cannot begin its next write. This serializes the stores without claiming
+cross-store atomicity. Credential clearing retains the already-gated `TerminalDataRepository`
+entry point and does not recursively acquire the gate.
+
+Runtime settings from `TerminalSpikeViewModel` use the same coordinator: AI command configuration,
+input-button placement, notification education and the startup shipped-keyboard upgrade. The
+upgrade reads its selected profile while holding the gate and checks that its update affected a
+row. `ReleaseNotesUpdateHost` receives the process-owned coordinator for both its initial baseline
+and explicit acknowledgement; unavailable recovery leaves unread notes unacknowledged and offers
+the existing save-failure UI. Cancellation still propagates. `AppSettingsRepository.update` stays
+the low-level DataStore primitive so backup/recovery owners can write without reacquiring their
+own authority lock.
+
+Production retains the existing-key-only `LegacyUserSettingsReader` and `LegacySecretReaders`.
+The retired `SecureUserSettingsStore`, `SecureSshPasswordStore`, `SecureSshIdentityStore`, and their
+historical recovery exceptions live only in `androidTest`, where they generate and verify legacy
+fixtures. Active compatibility results and password AAD identities remain in `SettingsLoadResult.kt`
+and `SshPasswordScope.kt`; legacy byte limits are owned by the production reader. Moving fixture
+writers does not delete or migrate any on-device file, key, Room row, or DataStore preference.
+
+`AesGcmCredentialStore` encrypts saved passwords, private-key payloads, and explicitly saved key passphrases with non-exportable app-specific Android Keystore AES-256-GCM keys and immutable UUID/kind associated data. Room contains authenticated ciphertext plus non-secret metadata, never plaintext. Reads return bounded mutable bytes to narrowly scoped transport or backup operations and wipe them on terminal paths. Missing, invalidated, corrupt, or unavailable keys preserve ciphertext and expose typed recovery; clearing credentials or all app data is separately confirmed. Imported fonts live in bounded app-private storage, while portable encrypted backup uses repository snapshots rather than copying Room, DataStore, or Keystore files directly.
+
+Disk, crypto, migration, backup, and transport work run away from the main thread. Presentation state never enters `TerminalBuffer`, `TerminalViewport`, or the native renderer hot path.
+
+`MoshSshSideChannel` owns the authenticated SSH companion used by attachments and user-requested
+project operations after bootstrap. Its name replaces the narrower `MoshImageUploadSession` name.
+Fresh-session cleanup removes the pending authentication lease from process tracking, attempts both
+returned and registered handles, and preserves an operation/authentication failure with close
+failures suppressed. If the handles are identical, normal completion closes them once. Direct
+upload cancellation or interruption does not trigger fresh authentication; a consumed upload or
+workspace creation is never replayed. The caller continues to own the upload input stream.
+
+`MainScreenSmokeTest` resolves visible text and accessibility descriptions from the current
+Activity resources, including formatted navigation/key labels. It does not assume English.
+An outer rule saves the current buffered draft, prepares an empty draft before Activity/ViewModel
+construction, and restores the original only after the Activity closes. Typing tests therefore
+cannot choose a later test's initial input mode or overwrite an existing user draft.
+
+SSH key import uses `launchSshIdentityImport` to release its document-grant callback from job
+completion, including cancellation before the IO worker starts. The worker retains its existing
+private-key byte cleanup; completion releases the grant after that cleanup. Imported identity
+labels remove controls, Unicode format characters and malformed surrogate units by code point,
+then retain complete characters within the existing 48-unit UTF-16 label limit. Basename
+selection, edge trimming and internal whitespace are preserved. Private-key contents are not
+rewritten by this display-label normalization.
+
+## Output batching
+
+Transport parsers publish bounded frames into `TerminalController`, which accepts batches into a bounded queue and applies at most one batch per Choreographer callback. A latest-value slot coalesces full-screen replacements; sorted dirty-row unions survive coalescing for precise native invalidation. Debug-only workload generators use structured coroutines and are not reachable from release UI.
+
+## Terminal engine decision
+
+ADR-002 retains the project-owned custom renderer and selects the project-owned bounded VT engine. This keeps the parser and renderer independent of third-party terminal-app source and keeps parser/model tests runnable on the JVM. The decision can be revisited with measured evidence and a separate licensing decision, but SSH and future transports now share the same screen contract.
+
+## Project reading and browser
+
+Two independent project tools sit alongside terminal sessions. `ProjectReader` uses
+bounded authenticated SSH exec channels to query Git and read source, including a
+Mosh session's SSH companion. Its native Compose workspace supports working-tree,
+index and branch-merge-base comparisons, file trees, source search and review
+drafts. `BrowserController` instead opens a user-configured code-server address in
+Android's system WebView, using the phone's existing network/Tailscale routing.
+The embedded browser lives inside MainActivity's security boundary and retains at
+most three application-context WebViews. Neither project tool changes the terminal
+hot path. See [project review](PROJECT-REVIEW.md) and
+[browser lifecycle and network policy](EMBEDDED-BROWSER.md).

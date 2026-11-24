@@ -16,6 +16,7 @@ enum class TerminalExtraKey(
     ALT("ALT", accessibilityDescriptionRes = R.string.terminal_key_alt_modifier),
     TAB("TAB", TerminalKeySequences.TAB),
     ENTER("↵", TerminalKeySequences.ENTER),
+    NEWLINE("LF", TerminalKeySequences.LINE_FEED, accessibilityDescriptionRes = R.string.terminal_key_newline),
     BACKSPACE("⌫", TerminalKeySequences.BACKSPACE),
     INSERT("INS", TerminalKeySequences.INSERT),
     UP("↑", TerminalKeySequences.ARROW_UP, byteArrayOf(0x1b, 0x5b, 0x31, 0x3b, 0x35, 0x41)),

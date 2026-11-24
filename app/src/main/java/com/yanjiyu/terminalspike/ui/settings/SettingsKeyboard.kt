@@ -639,6 +639,7 @@ internal fun keyboardActionLabel(action: KeyboardAction): String = when (action)
     KeyboardAction.INSERT -> stringResource(R.string.settings_keyboard_action_insert)
     KeyboardAction.DELETE -> stringResource(R.string.settings_keyboard_action_delete)
     KeyboardAction.ENTER -> stringResource(R.string.settings_keyboard_action_enter)
+    KeyboardAction.NEWLINE -> stringResource(R.string.settings_keyboard_action_newline)
     KeyboardAction.SLASH -> "/"
     KeyboardAction.BACKSLASH -> "\\"
     KeyboardAction.PIPE -> "|"

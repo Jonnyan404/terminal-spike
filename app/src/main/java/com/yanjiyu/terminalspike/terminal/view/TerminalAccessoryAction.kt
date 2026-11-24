@@ -124,6 +124,8 @@ sealed interface TerminalAccessoryAction {
     data class TmuxPrefix(
         val chord: String,
         override val stableId: String = "configured:tmux_prefix",
+        /** Set only by a user-authored chord key; null keeps the tmux prefix presentation. */
+        val customLabel: String? = null,
     ) : TerminalAccessoryAction {
         init {
             require(encodeTerminalChord(chord) != null) {
@@ -131,9 +133,11 @@ sealed interface TerminalAccessoryAction {
             }
         }
 
-        override val label: UiText = uiText(R.string.terminal_key_tmux_prefix_label)
-        override val accessibilityDescription: UiText =
-            uiText(R.string.terminal_key_tmux_prefix_description)
+        override val label: UiText
+            get() = customLabel?.let { uiToken(it) } ?: uiText(R.string.terminal_key_tmux_prefix_label)
+        override val accessibilityDescription: UiText
+            get() = customLabel?.let { uiText(R.string.terminal_key_custom_chord_description, it) }
+                ?: uiText(R.string.terminal_key_tmux_prefix_description)
     }
 
     data class Local(

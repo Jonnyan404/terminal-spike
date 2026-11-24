@@ -1,0 +1,94 @@
+name: Fork APK
+
+# The upstream workflow only runs on the maintainer's self-hosted Linux runner, so this fork
+# adds its own hosted build that produces an installable APK with the fork application ID.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'fork/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk 2>/dev/null || true
+          df -h /
+
+      - name: Set up JDK 17 (Kotlin toolchain) and 25 (build JVM)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            25
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required SDK packages
+        run: |
+          sdkmanager --install "platforms;android-37.0"
+          sdkmanager --install "ndk;29.0.14206865"
+          sdkmanager --list_installed | sed -n '1,60p'
+
+      - name: Create the debug keystore the fork build signs with
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Build the fork debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace \
+            -Dorg.gradle.java.installations.paths="$JAVA_HOME_17_X64,$JAVA_HOME_25_X64" \
+            :app:assembleDebug
+
+      - name: Collect the APK and checksums
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/terminal-spike-fork-${GITHUB_SHA::7}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk dist/terminal-spike-fork-latest.apk
+          cd dist
+          sha256sum ./*.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -lh
+
+      - name: Upload the fork APK as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-spike-fork-apk
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish or refresh the rolling fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view fork-build >/dev/null 2>&1; then
+            gh release create fork-build \
+              --target "$GITHUB_SHA" \
+              --title "Terminal Spike (Fork) build" \
+              --notes "Fork build of Terminal Spike, signed with a CI debug key. Application ID \`com.jonnyan404.terminalspike\`, so it installs next to the official app." \
+              --prerelease
+          fi
+          gh release upload fork-build dist/*.apk dist/SHA256SUMS.txt --clobber

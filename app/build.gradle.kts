@@ -667,12 +667,14 @@ extensions.configure<ApplicationExtension>("android") {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.yanjiyu.terminalspike"
+        // Fork build: a distinct application ID keeps this package installable next to the
+        // official com.yanjiyu.terminalspike app and its data.
+        applicationId = "com.jonnyan404.terminalspike"
         ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
         minSdk = 26
         targetSdk = 37
-        versionCode = 43
-        versionName = "0.0.27"
+        versionCode = 44
+        versionName = "0.0.27-fork.1"
 
         testInstrumentationRunner = "com.yanjiyu.terminalspike.TerminalSpikeTestRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"

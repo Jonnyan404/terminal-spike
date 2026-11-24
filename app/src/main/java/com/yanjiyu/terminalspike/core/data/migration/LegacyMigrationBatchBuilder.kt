@@ -522,6 +522,7 @@ internal object LegacyMigrationBatchBuilder {
         TerminalExtraKey.ALT -> KeyboardAction.ALT.wireCode
         TerminalExtraKey.TAB -> KeyboardAction.TAB.wireCode
         TerminalExtraKey.ENTER -> KeyboardAction.ENTER.wireCode
+        TerminalExtraKey.NEWLINE -> KeyboardAction.NEWLINE.wireCode
         TerminalExtraKey.INSERT -> KeyboardAction.INSERT.wireCode
         TerminalExtraKey.UP -> KeyboardAction.ARROW_UP.wireCode
         TerminalExtraKey.DOWN -> KeyboardAction.ARROW_DOWN.wireCode

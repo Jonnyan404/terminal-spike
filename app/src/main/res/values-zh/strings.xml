@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Terminal Spike</string>
+    <string name="app_name">Terminal Spike (Fork)</string>
     <string name="ssh_trust_first_contact_title">信任此 SSH 主机？</string>
     <string name="ssh_trust_first_contact_message">首次连接此主机。继续前，请与服务器管理员核对完整的 SHA-256 指纹。</string>
     <string name="ssh_trust_once">仅信任一次</string>
@@ -568,6 +568,9 @@
     <string name="settings_input_keyboard_add_left">左侧加键</string>
     <string name="settings_input_keyboard_add_right">右侧加键</string>
     <string name="settings_input_keyboard_remove">删除按键</string>
+    <string name="settings_input_keyboard_chord_label">自定义组合键</string>
+    <string name="settings_input_keyboard_chord_add">添加组合键</string>
+    <string name="settings_input_keyboard_chord_hint">写法：C-j 表示 Ctrl+J，M-Enter 表示 Alt+Enter，C-[ 表示 Ctrl+[。该键会把这一组合原样发给会话，可用于在 Claude Code、Codex 等工具里换行。</string>
     <string name="key_import_help">选择私钥文件（支持无扩展名文件），或粘贴私钥文本。</string>
     <string name="key_import_file">选择文件</string>
     <string name="key_import_paste">粘贴私钥</string>

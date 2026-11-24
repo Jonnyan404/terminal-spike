@@ -10,6 +10,9 @@ object TerminalKeySequences {
 
     val ESCAPE = byteArrayOf(0x1b)
     val ENTER = byteArrayOf(0x0d)
+
+    /** Literal line feed (Ctrl+J). Inserts a newline instead of submitting the current line. */
+    val LINE_FEED = byteArrayOf(0x0a)
     val BACKSPACE = byteArrayOf(0x7f)
     val TAB = byteArrayOf(0x09)
     val SHIFT_TAB = byteArrayOf(0x1b, 0x5b, 0x5a)

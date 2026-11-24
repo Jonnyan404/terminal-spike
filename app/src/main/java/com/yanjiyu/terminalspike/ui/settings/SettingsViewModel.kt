@@ -428,23 +428,7 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
         }
     }
 
-    fun applyKeyboardPreset(presetId: String) {
-        val preset = KeyboardPresets.selectable.firstOrNull { it.id == presetId } ?: return
-        updateKeyboardProfile { current ->
-            current.copy(
-                orderedActions = preset.actions,
-                layout = preset.layout,
-                modifierBehavior = preset.modifierBehavior,
-                hapticFeedbackEnabled = preset.hapticFeedbackEnabled,
-                keyRepeatEnabled = preset.keyRepeatEnabled,
-                inputMode = preset.inputMode,
-                tmuxPrefix = preset.tmuxPrefix,
-                defaultLayoutState = if (preset.id == KeyboardPresets.general.id)
-                    com.yanjiyu.terminalspike.core.model.KeyboardDefaultInheritance.reset(current).defaultLayoutState
-                    else null,
-            )
-        }
-    }
+    fun applyKeyboardPreset(presetId: String) = switchKeyboardPreset(presetId, forget = false)
 
     fun updateKeyboardActions(actions: List<KeyboardAction>) =
         updateKeyboardProfile { it.copy(orderedActions = actions) }
@@ -466,7 +450,40 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
 
     fun updateTmuxPrefix(value: String) = updateKeyboardProfile { it.copy(tmuxPrefix = value) }
 
-    fun resetKeyboardProfile() = applyKeyboardPreset(KeyboardPresets.general.id)
+    fun resetKeyboardProfile() = switchKeyboardPreset(KeyboardPresets.general.id, forget = true)
+
+    /**
+     * Switching presets keeps the deck the user actually built for the preset they are leaving, so
+     * coming back restores it instead of the shipped keys. An explicit reset forgets that memory.
+     */
+    private fun switchKeyboardPreset(presetId: String, forget: Boolean) {
+        val preset = KeyboardPresets.selectable.firstOrNull { it.id == presetId } ?: return
+        mutate {
+            val id = _uiState.value.keyboardProfile?.id
+                ?: throw IllegalStateException("No keyboard profile is available.")
+            val current = container.keyboardProfiles.get(id)
+                ?: throw IllegalStateException("The selected keyboard profile no longer exists.")
+            val settings = container.settings.settings.first()
+            val applied = KeyboardPresetMemory.apply(
+                memory = settings.keyboardPresetSnapshotsMap,
+                current = current,
+                preset = preset,
+                nowEpochMillis = System.currentTimeMillis(),
+                forget = forget,
+            )
+            write {
+                check(container.keyboardProfiles.update(applied.profile)) {
+                    "The keyboard profile could not be updated."
+                }
+            }
+            write {
+                container.settings.update { builder ->
+                    builder.clearKeyboardPresetSnapshots()
+                    applied.memory.forEach { (key, value) -> builder.putKeyboardPresetSnapshots(key, value) }
+                }
+            }
+        }
+    }
 
     override fun onCleared() {
         backupWorkflow.close()

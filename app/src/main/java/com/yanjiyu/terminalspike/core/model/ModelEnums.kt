@@ -165,6 +165,7 @@ enum class KeyboardAction(override val wireCode: String) : WireCoded {
     INSERT("insert"),
     DELETE("delete"),
     ENTER("enter"),
+    NEWLINE("newline"),
     SLASH("slash"),
     BACKSLASH("backslash"),
     PIPE("pipe"),

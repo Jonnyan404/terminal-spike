@@ -166,6 +166,8 @@
     <string name="terminal_key_control_u">Control U</string>
     <string name="terminal_key_control_k">Control K</string>
     <string name="terminal_key_hide_keyboard">隐藏软键盘</string>
+    <string name="terminal_key_newline">换行键（发送 LF）</string>
+    <string name="terminal_key_custom_chord_description">自定义组合键 %1$s</string>
     <string name="terminal_key_tmux_prefix_label">tmux</string>
     <string name="terminal_key_tmux_prefix_description">发送配置的 tmux 前缀键</string>
     <string name="terminal_key_paste_label">粘贴</string>
@@ -197,6 +199,7 @@
     <string name="settings_keyboard_action_insert">Ins</string>
     <string name="settings_keyboard_action_delete">Del</string>
     <string name="settings_keyboard_action_enter">Enter</string>
+    <string name="settings_keyboard_action_newline">换行 (LF)</string>
     <string name="settings_keyboard_action_tmux">tmux</string>
     <string name="settings_keyboard_action_paste">粘贴</string>
     <string name="settings_keyboard_action_select_images">选择图片</string>

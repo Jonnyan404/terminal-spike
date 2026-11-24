@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -36,6 +37,7 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
     var selected by remember { mutableStateOf<Int?>(null) }
     var insertion by remember { mutableStateOf<Int?>(null) }
     var search by remember { mutableStateOf("") }
+    var chordText by remember { mutableStateOf("") }
     var legacy by remember(value) { mutableStateOf(value.isEmpty()) }
     BackHandler(onBack = onDismiss)
     Column(Modifier.fillMaxSize().testTag("input-keyboard-editor")) {
@@ -92,6 +94,40 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
                         }, modifier = Modifier.fillMaxWidth().testTag("input-keyboard-choice-$token")) { Text(label) }
                     }
                 }
+                Text(
+                    text = stringResource(R.string.settings_input_keyboard_chord_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = chordText,
+                        onValueChange = { chordText = it.take(24) },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.settings_input_keyboard_chord_label)) },
+                        modifier = Modifier.weight(1f).testTag("input-keyboard-chord-field"),
+                    )
+                    TextButton(
+                        enabled = InputKeyboardLayout.chordToken(chordText) != null,
+                        onClick = {
+                            val token = InputKeyboardLayout.chordToken(chordText) ?: return@TextButton
+                            legacy = false
+                            tokens = tokens.toMutableList().apply {
+                                val at = insertion
+                                if (at != null) add(at, token) else set(requireNotNull(selected), token)
+                            }
+                            chordText = ""
+                            selected = null
+                            insertion = null
+                        },
+                        modifier = Modifier.testTag("input-keyboard-chord-add"),
+                    ) { Text(stringResource(R.string.settings_input_keyboard_chord_add)) }
+                }
             }
             TextButton(onClick = { legacy = true; tokens = defaults; selected = null; insertion = null },
                 modifier = Modifier.testTag("input-keyboard-reset")) { Text(stringResource(R.string.settings_input_keyboard_reset)) }
@@ -100,12 +136,19 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
 }
 
 @Composable
-internal fun inputKeyboardTokenLabel(token: String): String = when (token) {
-    "input" -> stringResource(R.string.settings_input_keyboard_field)
-    "toggle" -> stringResource(R.string.terminal_typing_toggle)
-    "enter" -> stringResource(R.string.terminal_enter_short)
-    else -> KeyboardAction.entries.first { it.wireCode == token }.let {
-        toInputAccessoryAction(it)?.label?.resolve() ?: keyboardActionLabel(it)
+internal fun inputKeyboardTokenLabel(token: String): String {
+    val chord = InputKeyboardLayout.chordSpec(token)
+    return if (chord != null) {
+        chord
+    } else {
+        when (token) {
+            "input" -> stringResource(R.string.settings_input_keyboard_field)
+            "toggle" -> stringResource(R.string.terminal_typing_toggle)
+            "enter" -> stringResource(R.string.terminal_enter_short)
+            else -> KeyboardAction.entries.firstOrNull { it.wireCode == token }?.let { action ->
+                toInputAccessoryAction(action)?.label?.resolve() ?: keyboardActionLabel(action)
+            } ?: token
+        }
     }
 }
 
