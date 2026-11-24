@@ -230,8 +230,17 @@
     <string name="settings_keyboard_preset_tmux_codex">tmux/Codex</string>
     <string name="settings_keyboard_preset_vim">Vim</string>
     <string name="settings_keyboard_preset_minimal">Minimal</string>
-    <string name="settings_keyboard_preset_custom">Custom</string>
-    <string name="settings_keyboard_preset_custom_summary">Keys you edited are saved here. Picking another preset switches away without discarding them, and tapping Custom brings them back.</string>
+    <string name="settings_keyboard_preset_add">New</string>
+    <string name="settings_keyboard_preset_rename">Rename</string>
+    <string name="settings_keyboard_preset_delete">Delete</string>
+    <string name="settings_keyboard_preset_name_label">Preset name</string>
+    <string name="settings_keyboard_preset_create_title">Save as preset</string>
+    <string name="settings_keyboard_preset_rename_title">Rename preset</string>
+    <string name="settings_keyboard_preset_delete_title">Delete this preset?</string>
+    <string name="settings_keyboard_preset_delete_message">Delete \"%1$s\"? Its keys cannot be recovered.</string>
+    <string name="settings_keyboard_preset_limit">Preset limit reached. Delete one before adding another.</string>
+    <string name="settings_keyboard_preset_default_name">Preset %1$d</string>
+    <string name="settings_keyboard_preset_summary">Edits are saved to the selected preset. Built-in presets can be restored to their defaults; custom presets can be renamed or deleted.</string>
     <string name="settings_keyboard_replace_hint">Tap a configured key to replace it. Swipe for more keys, or edit the full layout below.</string>
     <string name="settings_keyboard_replace_title">Replace %1$s</string>
     <string name="settings_keyboard_replace_summary">Choose the key or action for this position.</string>
@@ -274,9 +283,9 @@
     <string name="settings_keyboard_move_before">Move before</string>
     <string name="settings_keyboard_move_after">Move after</string>
     <string name="settings_keyboard_drag_description">Drag to reorder %1$s</string>
-    <string name="settings_restore_keyboard_preset">Restore General terminal preset</string>
-    <string name="settings_reset_keyboard_title">Restore the General preset?</string>
-    <string name="settings_reset_keyboard_message">Replace the current layout with 20 keys, ten per row, and safe Raw input defaults.</string>
+    <string name="settings_restore_keyboard_preset">Restore this preset\'s defaults</string>
+    <string name="settings_reset_keyboard_title">Restore the default keys?</string>
+    <string name="settings_reset_keyboard_message">Replace this preset\'s keys with the ones it ships with. Your other presets are untouched.</string>
     <string name="settings_add_key">Find an action to add</string>
 
     <string name="settings_sessions_intro">Android health is reported from public platform APIs. The app does not request unrestricted battery access automatically.</string>

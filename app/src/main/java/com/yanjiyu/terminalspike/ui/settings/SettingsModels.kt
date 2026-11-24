@@ -206,6 +206,9 @@ internal enum class SensitiveClipboardClearPreset(
     }
 }
 
+/** A user-created keyboard preset as the settings list shows it. */
+internal data class KeyboardPresetLabel(val id: String, val label: String)
+
 internal data class SettingsUiState(
     val buttonColors: Map<String, String> = emptyMap(),
     val preferences: AppPreferences = AppPreferences(),
@@ -213,8 +216,9 @@ internal data class SettingsUiState(
     val keyboardProfile: KeyboardProfile? = null,
     val importedFonts: List<ImportedTerminalFont> = emptyList(),
     val customTerminalThemes: List<CustomTerminalTheme> = emptyList(),
-    /** Whether a customized deck is saved, so the Custom preset chip can offer to restore it. */
-    val keyboardCustomDeckAvailable: Boolean = false,
+    /** User-created presets, in creation order. Their decks live in the preset store. */
+    val keyboardCustomPresets: List<KeyboardPresetLabel> = emptyList(),
+    val keyboardSelectedPresetId: String = KeyboardPresets.general.id,
     val profilesLoading: Boolean = true,
     val writeInProgress: Boolean = false,
     @StringRes val message: Int? = null,
@@ -446,6 +450,9 @@ internal object KeyboardPresets {
     )
 
     val selectable = listOf(general, vim, minimal)
+
+    /** The preset a chip with [id] stands for, or null when [id] names a user-created preset. */
+    fun shipped(id: String): KeyboardPreset? = selectable.firstOrNull { it.id == id }
 
     /**
      * Identity of the saved deck built by editing a preset. Presets are read-only templates, so an

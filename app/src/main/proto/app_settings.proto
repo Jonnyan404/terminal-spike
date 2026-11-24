@@ -67,9 +67,14 @@ message AppSettings {
   // Device-local accessory button backgrounds, keyed by runtime stable ID.
   map<string, string> button_colors = 32;
 
-  // Device-local copy of the deck the user built by editing a preset. Presets are read-only
-  // templates, so this payload is what the Custom preset chip restores. Empty when never edited.
-  string keyboard_custom_deck = 36;
+  // Device-local decks for the keyboard preset chips, keyed by preset ID. A shipped preset gets an
+  // entry once it is edited, so its changes survive switching away and can be restored; a custom
+  // preset always has an entry and owns its label.
+  map<string, KeyboardPresetDeck> keyboard_presets = 36;
+
+  // Device-local choice of preset per keyboard profile ID. Stored instead of inferred from the deck
+  // so an edited preset still reads as that preset.
+  map<string, string> keyboard_profile_presets = 35;
 
   // Message presence distinguishes an untouched install from an intentionally empty agent list.
   AiAgentConfiguration ai_agents = 31;
@@ -101,6 +106,13 @@ message AppSettings {
     OSC52_POLICY_DISABLED = 1;
     OSC52_POLICY_ASK = 2;
   }
+}
+
+message KeyboardPresetDeck {
+  // Versioned deck payload. Values that no longer parse fall back to the shipped preset.
+  string payload = 1;
+  // User-visible name, empty for shipped presets.
+  string label = 2;
 }
 
 message AiAgentConfiguration {

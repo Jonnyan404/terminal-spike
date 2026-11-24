@@ -11,6 +11,7 @@ import com.yanjiyu.terminalspike.core.data.repository.SettingsMutationScope
 import com.yanjiyu.terminalspike.core.data.settings.AppSettings
 import com.yanjiyu.terminalspike.core.data.migration.LegacyIds
 import com.yanjiyu.terminalspike.core.data.settings.CURRENT_KEYBOARD_DECK_REVISION
+import com.yanjiyu.terminalspike.core.data.settings.KeyboardPresetDeck
 import com.yanjiyu.terminalspike.core.model.BellSettings
 import com.yanjiyu.terminalspike.core.model.CursorStyle
 import com.yanjiyu.terminalspike.core.model.CustomTerminalTheme
@@ -87,6 +88,15 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
                     container.customTerminalThemes.observeAll(),
                     profileTargets,
                 ) { settings, terminalProfiles, keyboardProfiles, customThemes, targets ->
+                    val keyboardProfile = resolveSettingsProfile(
+                        profiles = keyboardProfiles,
+                        requestedId = targets.keyboardProfileId,
+                        defaultId = settings.defaultKeyboardProfileId,
+                        idOf = KeyboardProfile::id,
+                    )
+                    val presetDecks = settings.keyboardPresetsMap.mapValues { (_, entry) ->
+                        KeyboardPresetStore.Deck(payload = entry.payload, label = entry.label)
+                    }
                     SettingsUiState(
                         preferences = settings.toPreferences(),
                         buttonColors = settings.buttonColorsMap,
@@ -96,17 +106,19 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
                             defaultId = settings.defaultTerminalProfileId,
                             idOf = TerminalProfile::id,
                         ),
-                        keyboardProfile = resolveSettingsProfile(
-                            profiles = keyboardProfiles,
-                            requestedId = targets.keyboardProfileId,
-                            defaultId = settings.defaultKeyboardProfileId,
-                            idOf = KeyboardProfile::id,
-                        ),
+                        keyboardProfile = keyboardProfile,
                         importedFonts = fontStore.list(),
                         customTerminalThemes = customThemes,
-                        keyboardCustomDeckAvailable = KeyboardPresetMemory.hasSavedDeck(
-                            settings.keyboardCustomDeck,
-                        ),
+                        keyboardCustomPresets = presetDecks
+                            .filterKeys { KeyboardPresetStore.isCustom(it) }
+                            .map { (id, entry) -> KeyboardPresetLabel(id, entry.label.ifBlank { id }) },
+                        keyboardSelectedPresetId = keyboardProfile?.let { profile ->
+                            KeyboardPresetStore.selectedId(
+                                stored = settings.keyboardProfilePresetsMap[profile.id],
+                                profile = profile,
+                                decks = presetDecks,
+                            )
+                        } ?: KeyboardPresets.general.id,
                         profilesLoading = false,
                     )
                 }.collect { loaded ->
@@ -432,14 +444,21 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     }
 
     /**
-     * Applies a shipped preset, or restores the saved custom deck when [presetId] is the Custom
-     * entry. Presets are templates, so a customization is kept as its own deck instead of being
-     * overwritten by whichever preset is picked next.
+     * Applies the preset behind a chip. A shipped preset carries whatever edits were stored for it,
+     * a custom preset carries its own deck, and the deck being left is saved first so a switch never
+     * discards work (accessory key replacement writes the profile without going through here).
      */
-    fun applyKeyboardPreset(presetId: String) {
-        val target = KeyboardPresets.selectable.firstOrNull { it.id == presetId }
-        if (target == null && presetId != KeyboardPresets.CUSTOM_ID) return
-        switchKeyboardPreset(target)
+    fun applyKeyboardPreset(presetId: String) = mutate {
+        val snapshot = keyboardSnapshot()
+        if (KeyboardPresets.shipped(presetId) == null && presetId !in snapshot.decks) return@mutate
+        val kept = KeyboardPresetStore.save(snapshot.selectedPresetId, snapshot.decks, snapshot.profile)
+        val deck = KeyboardPresetStore.deckFor(presetId, kept, snapshot.profile)
+        write {
+            check(container.keyboardProfiles.update(deck.bumped())) {
+                "The keyboard profile could not be updated."
+            }
+        }
+        persistPresets(snapshot.profileId, kept, presetId)
     }
 
     fun updateKeyboardActions(actions: List<KeyboardAction>) =
@@ -462,33 +481,123 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
 
     fun updateTmuxPrefix(value: String) = updateKeyboardProfile { it.copy(tmuxPrefix = value) }
 
-    fun resetKeyboardProfile() = switchKeyboardPreset(KeyboardPresets.general)
+    /** Puts the selected shipped preset back to the keys it ships with; custom presets are deleted. */
+    fun restoreKeyboardPresetDefaults() = mutate {
+        val snapshot = keyboardSnapshot()
+        val shipped = KeyboardPresets.shipped(snapshot.selectedPresetId) ?: return@mutate
+        val restored = KeyboardPresetStore.shippedDeck(shipped, snapshot.profile).bumped()
+        write {
+            check(container.keyboardProfiles.update(restored)) {
+                "The keyboard profile could not be updated."
+            }
+        }
+        persistPresets(snapshot.profileId, snapshot.decks - shipped.id, shipped.id)
+    }
 
-    /**
-     * Swaps the live deck for [target], or for the saved custom deck when [target] is null. A deck
-     * that stopped matching a preset is stored first, so no switch can drop a customization.
-     */
-    private fun switchKeyboardPreset(target: KeyboardPreset?) {
-        mutate {
-            val id = _uiState.value.keyboardProfile?.id
-                ?: throw IllegalStateException("No keyboard profile is available.")
-            val current = container.keyboardProfiles.get(id)
-                ?: throw IllegalStateException("The selected keyboard profile no longer exists.")
-            val settings = container.settings.settings.first()
-            val applied = KeyboardPresetMemory.apply(
-                memory = settings.keyboardCustomDeck,
-                current = current,
-                target = target,
-                nowEpochMillis = System.currentTimeMillis(),
-            )
-            write {
-                check(container.keyboardProfiles.update(applied.profile)) {
-                    "The keyboard profile could not be updated."
-                }
+    /** Saves the live deck as a new custom preset and selects it. */
+    fun createCustomKeyboardPreset(label: String) = mutate {
+        val snapshot = keyboardSnapshot()
+        val customCount = snapshot.decks.keys.count { KeyboardPresetStore.isCustom(it) }
+        if (customCount >= KeyboardPresetStore.MAX_CUSTOM_PRESETS) {
+            publishMessage(R.string.settings_keyboard_preset_limit)
+            return@mutate
+        }
+        val kept = KeyboardPresetStore.save(snapshot.selectedPresetId, snapshot.decks, snapshot.profile)
+        val newId = KeyboardPresetStore.newCustomId(kept.keys, System.currentTimeMillis())
+        val name = KeyboardPresetStore.labelOf(
+            label,
+            getApplication<Application>().getString(
+                R.string.settings_keyboard_preset_default_name,
+                customCount + 1,
+            ),
+        )
+        val created = kept + mapOf(
+            newId to KeyboardPresetStore.Deck(
+                payload = KeyboardPresetStore.snapshot(snapshot.profile),
+                label = name,
+            ),
+        )
+        persistPresets(snapshot.profileId, created, newId)
+    }
+
+    fun renameCustomKeyboardPreset(presetId: String, label: String) = mutate {
+        val snapshot = keyboardSnapshot()
+        val entry = snapshot.decks[presetId]?.takeIf { KeyboardPresetStore.isCustom(presetId) }
+            ?: return@mutate
+        val renamed = snapshot.decks + mapOf(
+            presetId to entry.copy(label = KeyboardPresetStore.labelOf(label, entry.label)),
+        )
+        persistPresets(snapshot.profileId, renamed, snapshot.selectedPresetId)
+    }
+
+    /** Deletes a custom preset, falling back to the General preset when it was the selected one. */
+    fun deleteCustomKeyboardPreset(presetId: String) = mutate {
+        val snapshot = keyboardSnapshot()
+        if (!KeyboardPresetStore.isCustom(presetId) || presetId !in snapshot.decks) return@mutate
+        val remaining = snapshot.decks - presetId
+        if (snapshot.selectedPresetId != presetId) {
+            persistPresets(snapshot.profileId, remaining, snapshot.selectedPresetId)
+            return@mutate
+        }
+        val fallback = KeyboardPresetStore.deckFor(KeyboardPresets.general.id, remaining, snapshot.profile)
+        write {
+            check(container.keyboardProfiles.update(fallback.bumped())) {
+                "The keyboard profile could not be updated."
             }
-            if (applied.memory != settings.keyboardCustomDeck) {
-                write { container.settings.update { it.setKeyboardCustomDeck(applied.memory) } }
+        }
+        persistPresets(snapshot.profileId, remaining, KeyboardPresets.general.id)
+    }
+
+    private fun KeyboardProfile.bumped(): KeyboardProfile =
+        copy(updatedAtEpochMillis = System.currentTimeMillis())
+
+    /** Live keyboard state plus the stored decks every preset operation works from. */
+    private data class KeyboardSettingsSnapshot(
+        val profileId: String,
+        val profile: KeyboardProfile,
+        val decks: Map<String, KeyboardPresetStore.Deck>,
+        val selectedPresetId: String,
+    )
+
+    private suspend fun SettingsMutationScope.keyboardSnapshot(): KeyboardSettingsSnapshot {
+        val profileId = _uiState.value.keyboardProfile?.id
+            ?: throw IllegalStateException("No keyboard profile is available.")
+        val profile = container.keyboardProfiles.get(profileId)
+            ?: throw IllegalStateException("The selected keyboard profile no longer exists.")
+        val settings = container.settings.settings.first()
+        val decks = settings.keyboardPresetsMap.mapValues { (_, entry) ->
+            KeyboardPresetStore.Deck(payload = entry.payload, label = entry.label)
+        }
+        return KeyboardSettingsSnapshot(
+            profileId = profileId,
+            profile = profile,
+            decks = decks,
+            selectedPresetId = KeyboardPresetStore.selectedId(
+                stored = settings.keyboardProfilePresetsMap[profileId],
+                profile = profile,
+                decks = decks,
+            ),
+        )
+    }
+
+    /** Stores the preset decks and the preset selected for this keyboard profile in one write. */
+    private suspend fun SettingsMutationScope.persistPresets(
+        profileId: String,
+        decks: Map<String, KeyboardPresetStore.Deck>,
+        selectedPresetId: String,
+    ) = write {
+        container.settings.update { builder ->
+            builder.clearKeyboardPresets()
+            decks.forEach { (id, entry) ->
+                builder.putKeyboardPresets(
+                    id,
+                    KeyboardPresetDeck.newBuilder()
+                        .setPayload(entry.payload)
+                        .setLabel(entry.label)
+                        .build(),
+                )
             }
+            builder.putKeyboardProfilePresets(profileId, selectedPresetId)
         }
     }
 
@@ -545,23 +654,18 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     }
 
     private fun updateKeyboardProfile(transform: (KeyboardProfile) -> KeyboardProfile) = mutate {
-        val id = _uiState.value.keyboardProfile?.id
-            ?: throw IllegalStateException("No keyboard profile is available.")
-        val current = container.keyboardProfiles.get(id)
-            ?: throw IllegalStateException("The selected keyboard profile no longer exists.")
-        val updated = transform(current).copy(updatedAtEpochMillis = System.currentTimeMillis())
+        val snapshot = keyboardSnapshot()
+        val updated = transform(snapshot.profile).bumped()
         write {
             check(container.keyboardProfiles.update(updated)) {
                 "The keyboard profile could not be updated."
             }
         }
-        // Presets are read-only templates, so anything that stops matching one is the user's own
-        // deck: keep a copy the moment it changes rather than waiting for the next preset switch.
-        val settings = container.settings.settings.first()
-        val memory = KeyboardPresetMemory.remember(settings.keyboardCustomDeck, updated)
-        if (memory != settings.keyboardCustomDeck) {
-            write { container.settings.update { it.setKeyboardCustomDeck(memory) } }
-        }
+        // Every edit belongs to the selected preset, so it is stored with that preset and survives
+        // switching to another one. A shipped preset that is back to its shipped keys drops its
+        // entry again, which keeps "edited" distinguishable from "untouched".
+        val kept = KeyboardPresetStore.save(snapshot.selectedPresetId, snapshot.decks, updated)
+        persistPresets(snapshot.profileId, kept, snapshot.selectedPresetId)
     }
 
     private fun mutate(block: suspend SettingsMutationScope.() -> Unit) {

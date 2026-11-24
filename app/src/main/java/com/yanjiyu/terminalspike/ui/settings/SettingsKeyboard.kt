@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +62,11 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
     var editKeys by remember { mutableStateOf(false) }
     var replacementIndex by remember(profile?.id) { mutableStateOf<Int?>(null) }
     var resetRequested by remember { mutableStateOf(false) }
+    var createPresetRequested by remember { mutableStateOf(false) }
+    var renamePresetRequested by remember(state.keyboardSelectedPresetId) { mutableStateOf(false) }
+    var deletePresetRequested by remember(state.keyboardSelectedPresetId) { mutableStateOf(false) }
+    val selectedPresetId = state.keyboardSelectedPresetId
+    val selectedCustomPreset = state.keyboardCustomPresets.firstOrNull { it.id == selectedPresetId }
     if (editInputKeys) {
         InputKeyboardEditor(
         state.preferences.inputKeyboardLayout, state.preferences.inputButtonsOnRight,
@@ -81,9 +87,6 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
         } else {
             item(key = R.string.settings_keyboard_preset_heading) { SectionLabel(R.string.settings_keyboard_preset_heading) }
             item {
-                val selectedPresetId = KeyboardPresets.selectedId(profile)
-                val customShown = state.keyboardCustomDeckAvailable ||
-                    selectedPresetId == KeyboardPresets.CUSTOM_ID
                 HorizontalChoices {
                     KeyboardPresets.selectable.forEach { preset ->
                         FilterChip(
@@ -92,22 +95,37 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                             label = { Text(stringResource(preset.labelRes)) },
                         )
                     }
-                    if (customShown) {
+                    state.keyboardCustomPresets.forEach { preset ->
                         FilterChip(
-                            selected = selectedPresetId == KeyboardPresets.CUSTOM_ID,
-                            onClick = { actions.onKeyboardPreset(KeyboardPresets.CUSTOM_ID) },
-                            label = { Text(stringResource(R.string.settings_keyboard_preset_custom)) },
-                            modifier = Modifier.testTag(KeyboardPresetCustomTestTag),
+                            selected = selectedPresetId == preset.id,
+                            onClick = { actions.onKeyboardPreset(preset.id) },
+                            label = { Text(preset.label) },
+                            modifier = Modifier.testTag(KeyboardPresetChipTestTagPrefix + preset.id),
+                        )
+                    }
+                    if (state.keyboardCustomPresets.size < KeyboardPresetStore.MAX_CUSTOM_PRESETS) {
+                        AssistChip(
+                            onClick = { createPresetRequested = true },
+                            label = { Text(stringResource(R.string.settings_keyboard_preset_add)) },
+                            modifier = Modifier.testTag(KeyboardPresetAddTestTag),
                         )
                     }
                 }
-                if (customShown) {
-                    Text(
-                        text = stringResource(R.string.settings_keyboard_preset_custom_summary),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                Text(
+                    text = stringResource(R.string.settings_keyboard_preset_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                if (selectedCustomPreset != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { renamePresetRequested = true }) {
+                            Text(stringResource(R.string.settings_keyboard_preset_rename))
+                        }
+                        TextButton(onClick = { deletePresetRequested = true }) {
+                            Text(stringResource(R.string.settings_keyboard_preset_delete))
+                        }
+                    }
                 }
             }
             item(key = R.string.settings_edit_keyboard_keys) {
@@ -214,9 +232,11 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            item {
-                TextButton(onClick = { resetRequested = true }) {
-                    Text(stringResource(R.string.settings_restore_keyboard_preset))
+            if (KeyboardPresets.shipped(selectedPresetId) != null) {
+                item {
+                    TextButton(onClick = { resetRequested = true }) {
+                        Text(stringResource(R.string.settings_restore_keyboard_preset))
+                    }
                 }
             }
         }
@@ -259,6 +279,84 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
             },
         )
     }
+    if (createPresetRequested) {
+        KeyboardPresetNameDialog(
+            title = stringResource(R.string.settings_keyboard_preset_create_title),
+            initial = "",
+            onDismiss = { createPresetRequested = false },
+            onConfirm = { label ->
+                createPresetRequested = false
+                actions.onKeyboardPresetCreate(label)
+            },
+        )
+    }
+    selectedCustomPreset?.let { preset ->
+        if (renamePresetRequested) {
+            KeyboardPresetNameDialog(
+                title = stringResource(R.string.settings_keyboard_preset_rename_title),
+                initial = preset.label,
+                onDismiss = { renamePresetRequested = false },
+                onConfirm = { label ->
+                    renamePresetRequested = false
+                    actions.onKeyboardPresetRename(preset.id, label)
+                },
+            )
+        }
+        if (deletePresetRequested) {
+            AppDialog(
+                onDismissRequest = { deletePresetRequested = false },
+                title = { Text(stringResource(R.string.settings_keyboard_preset_delete_title)) },
+                text = {
+                    Text(stringResource(R.string.settings_keyboard_preset_delete_message, preset.label))
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            deletePresetRequested = false
+                            actions.onKeyboardPresetDelete(preset.id)
+                        },
+                    ) { Text(stringResource(R.string.settings_keyboard_preset_delete)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deletePresetRequested = false }) {
+                        Text(stringResource(android.R.string.cancel))
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyboardPresetNameDialog(
+    title: String,
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    AppDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(KeyboardPresetStore.MAX_LABEL_LENGTH) },
+                label = { Text(stringResource(R.string.settings_keyboard_preset_name_label)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag(KeyboardPresetNameFieldTestTag),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim()) },
+                enabled = name.isNotBlank(),
+            ) { Text(stringResource(android.R.string.ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+        },
+    )
 }
 
 internal const val KeyboardPreviewKeyTestTagPrefix = "keyboard-preview-key-"
@@ -706,4 +804,6 @@ internal fun keyboardActionLabel(action: KeyboardAction): String = when (action)
 
 internal const val KeyboardSettingsTestTag = "keyboard-settings"
 internal const val KeyboardPreviewTestTag = "keyboard-profile-preview"
-internal const val KeyboardPresetCustomTestTag = "keyboard-preset-custom"
+internal const val KeyboardPresetAddTestTag = "keyboard-preset-add"
+internal const val KeyboardPresetChipTestTagPrefix = "keyboard-preset-chip-"
+internal const val KeyboardPresetNameFieldTestTag = "keyboard-preset-name"
