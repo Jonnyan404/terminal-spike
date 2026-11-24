@@ -55,6 +55,9 @@ import com.yanjiyu.terminalspike.core.model.KeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardProfile
 import com.yanjiyu.terminalspike.ui.TerminalShortcutEditorKey
 import com.yanjiyu.terminalspike.ui.TerminalShortcutPreview
+import com.yanjiyu.terminalspike.ui.accessoryKeyboardAction
+import com.yanjiyu.terminalspike.ui.editableAccessoryKeyboardActions
+import com.yanjiyu.terminalspike.terminal.view.TerminalAccessoryAction
 import com.yanjiyu.terminalspike.ui.theme.AppDialog
 
 @Composable
@@ -62,7 +65,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
     val profile = state.keyboardProfile
     var editInputKeys by remember { mutableStateOf(false) }
     var editKeys by remember { mutableStateOf(false) }
-    var replacementIndex by remember(profile?.id) { mutableStateOf<Int?>(null) }
+    var replacementTarget by remember(profile?.id) { mutableStateOf<TerminalAccessoryAction?>(null) }
     var resetRequested by remember { mutableStateOf(false) }
     var createPresetRequested by remember { mutableStateOf(false) }
     var renamePresetRequested by remember(state.keyboardSelectedPresetId) { mutableStateOf(false) }
@@ -151,7 +154,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                     profile = profile,
                     buttonColors = state.buttonColors,
                     chords = state.customChords,
-                    onKeyClick = { index -> replacementIndex = index },
+                    onKeyClick = { replacementTarget = it },
                     onEditKeys = { editKeys = true },
                 )
                 Button(
@@ -269,19 +272,23 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
             },
         )
     }
-    replacementIndex?.let { index ->
-        profile?.orderedActions?.getOrNull(index)?.let { current ->
-            KeyboardKeyReplacementDialog(
-                current = current,
-                onDismiss = { replacementIndex = null },
-                onSelect = { replacement ->
-                    actions.onKeyboardActions(
-                        replaceKeyboardActionAt(profile.orderedActions, index, replacement),
-                    )
-                    replacementIndex = null
-                },
-            )
-        }
+    replacementTarget?.let { target ->
+        // Replace inside the deck the user is looking at. The default deck is rendered with a few
+        // shipped substitutions, so materializing it first keeps every other key exactly where it
+        // was instead of reflowing the layout around one replacement.
+        val deck = profile?.toRuntimeAccessoryActionsOrNull()
+            ?.let(::editableAccessoryKeyboardActions)
+            .orEmpty()
+        val selected = accessoryKeyboardAction(target)
+        val index = if (selected == null) -1 else deck.indexOf(selected)
+        if (index >= 0) KeyboardKeyReplacementDialog(
+            current = deck[index],
+            onDismiss = { replacementTarget = null },
+            onSelect = { replacement ->
+                actions.onKeyboardActions(replaceKeyboardActionAt(deck, index, replacement))
+                replacementTarget = null
+            },
+        )
     }
     if (resetRequested) {
         ResetDialog(
@@ -381,7 +388,7 @@ private fun KeyboardDeckPreview(
     profile: KeyboardProfile,
     buttonColors: Map<String, String>,
     chords: List<KeyboardChord>,
-    onKeyClick: (Int) -> Unit,
+    onKeyClick: (TerminalAccessoryAction) -> Unit,
     onEditKeys: () -> Unit,
 ) {
     val runtimeActions = profile.toRuntimeAccessoryActionsOrNull().orEmpty() +
@@ -392,7 +399,7 @@ private fun KeyboardDeckPreview(
             buttonColors = buttonColors,
             layout = profile.layout,
             keyTagPrefix = KeyboardPreviewKeyTestTagPrefix,
-            onKeyClick = onKeyClick,
+            onKeyClick = { index -> runtimeActions.getOrNull(index)?.let(onKeyClick) },
             onEditKeys = onEditKeys,
         )
     }
@@ -514,6 +521,11 @@ internal const val KeyboardEditorDeckTestTag = "keyboard-editor-deck"
 internal const val KeyboardEditorRowTestTagPrefix = "keyboard-editor-row-"
 internal const val KeyboardEditorKeyTestTagPrefix = "keyboard-editor-key-"
 
+/**
+ * Puts [replacement] in [index] and drops the key it replaced. When [replacement] already sits
+ * somewhere else on the deck, that copy is removed instead of moving the old key into its slot: a
+ * replacement should only ever change the key the user picked.
+ */
 internal fun replaceKeyboardActionAt(
     actions: List<KeyboardAction>,
     index: Int,
@@ -522,11 +534,11 @@ internal fun replaceKeyboardActionAt(
     require(index in actions.indices) { "Keyboard action position is out of range." }
     val current = actions[index]
     if (replacement == current) return actions
-    return actions.toMutableList().apply {
-        val existingIndex = indexOf(replacement)
-        this[index] = replacement
-        if (existingIndex >= 0) this[existingIndex] = current
-    }
+    val existing = actions.indexOf(replacement)
+    val next = actions.toMutableList()
+    next[index] = replacement
+    if (existing >= 0 && existing != index) next.removeAt(existing)
+    return next
 }
 
 @Composable

@@ -23,15 +23,15 @@ class KeyboardActionReplacementTest {
     }
 
     @Test
-    fun sameActionIsNoOpAndAnExistingActionSwapsPositions() {
+    fun sameActionIsNoOpAndAnExistingActionKeepsOneCopy() {
         val original = KeyboardPresets.general.actions
 
         assertSame(original, replaceKeyboardActionAt(original, 0, original[0]))
-        val swapped = replaceKeyboardActionAt(original, 0, original[1])
-        assertEquals(original[1], swapped[0])
-        assertEquals(original[0], swapped[1])
-        assertEquals(original.drop(2), swapped.drop(2))
-        assertEquals(original.toSet(), swapped.toSet())
+        // Replacing a key with one that already exists must not move the old key to another slot.
+        val replaced = replaceKeyboardActionAt(original, 0, original[1])
+        assertEquals(original[1], replaced[0])
+        assertEquals(original.size - 1, replaced.size)
+        assertEquals(original.drop(2), replaced.drop(1))
     }
 
     @Test

@@ -444,7 +444,7 @@ fun TerminalAccessoryBar(
     }
 }
 
-private fun displayedAccessoryActions(actions: List<TerminalAccessoryAction>): List<TerminalAccessoryAction> =
+internal fun displayedAccessoryActions(actions: List<TerminalAccessoryAction>): List<TerminalAccessoryAction> =
     if (actions.matchDefaultAccessoryDeck()) {
         actions.flatMap { action ->
             when (action.defaultDeckKeyOrNull()) {
@@ -1470,7 +1470,7 @@ internal fun editableAccessoryKeyboardActions(actions: List<TerminalAccessoryAct
     }.map { requireNotNull(accessoryKeyboardAction(it)) }
 }
 
-private fun accessoryKeyboardAction(action: TerminalAccessoryAction): KeyboardAction? {
+internal fun accessoryKeyboardAction(action: TerminalAccessoryAction): KeyboardAction? {
     fun identity(value: TerminalAccessoryAction): Any = when (value) {
         is TerminalAccessoryAction.Key -> value.key
         is TerminalAccessoryAction.Modifier -> value.modifier
