@@ -117,14 +117,21 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-                if (selectedCustomPreset != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Preset actions belong under the chips: keeping the restore button inside the
+                // preset block means it is visible without scrolling to the bottom of the page.
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (selectedCustomPreset != null) {
                         TextButton(onClick = { renamePresetRequested = true }) {
                             Text(stringResource(R.string.settings_keyboard_preset_rename))
                         }
                         TextButton(onClick = { deletePresetRequested = true }) {
                             Text(stringResource(R.string.settings_keyboard_preset_delete))
                         }
+                    } else if (KeyboardPresets.shipped(selectedPresetId) != null) {
+                        TextButton(
+                            onClick = { resetRequested = true },
+                            modifier = Modifier.testTag(KeyboardPresetRestoreTestTag),
+                        ) { Text(stringResource(R.string.settings_restore_keyboard_preset)) }
                     }
                 }
             }
@@ -231,13 +238,6 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-            }
-            if (KeyboardPresets.shipped(selectedPresetId) != null) {
-                item {
-                    TextButton(onClick = { resetRequested = true }) {
-                        Text(stringResource(R.string.settings_restore_keyboard_preset))
-                    }
-                }
             }
         }
     }
@@ -719,8 +719,11 @@ private fun KeyboardActionEditorKey(
 }
 
 @Composable
-internal fun keyboardActionSearchText(action: KeyboardAction): String =
-    "${action.wireCode} ${keyboardActionLabel(action)}".replace('_', ' ')
+internal fun keyboardActionSearchText(action: KeyboardAction): String {
+    val base = "${action.wireCode} ${keyboardActionLabel(action)}".replace('_', ' ')
+    // "ctrl j" is how people look for a line feed, and the newline key sends exactly that byte.
+    return if (action == KeyboardAction.NEWLINE) "$base ctrl j ctrl+j linefeed newline" else base
+}
 
 @Composable
 internal fun keyboardActionLabel(action: KeyboardAction): String = when (action) {
@@ -807,3 +810,4 @@ internal const val KeyboardPreviewTestTag = "keyboard-profile-preview"
 internal const val KeyboardPresetAddTestTag = "keyboard-preset-add"
 internal const val KeyboardPresetChipTestTagPrefix = "keyboard-preset-chip-"
 internal const val KeyboardPresetNameFieldTestTag = "keyboard-preset-name"
+internal const val KeyboardPresetRestoreTestTag = "keyboard-preset-restore"

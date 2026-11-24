@@ -171,7 +171,7 @@
     <string name="terminal_key_control_u">Control U</string>
     <string name="terminal_key_control_k">Control K</string>
     <string name="terminal_key_hide_keyboard">Hide software keyboard</string>
-    <string name="terminal_key_newline">Newline key (line feed)</string>
+    <string name="terminal_key_newline">Newline key, same as Ctrl+J</string>
     <string name="terminal_key_custom_chord_description">Custom key chord %1$s</string>
     <string name="terminal_key_tmux_prefix_label">tmux</string>
     <string name="terminal_key_tmux_prefix_description">Send configured tmux prefix</string>
@@ -205,7 +205,7 @@
     <string name="settings_keyboard_action_insert">Ins</string>
     <string name="settings_keyboard_action_delete">Del</string>
     <string name="settings_keyboard_action_enter">Enter</string>
-    <string name="settings_keyboard_action_newline">Newline (LF)</string>
+    <string name="settings_keyboard_action_newline">Newline · Ctrl+J (LF)</string>
     <string name="settings_keyboard_action_tmux">tmux</string>
     <string name="settings_keyboard_action_paste">Paste</string>
     <string name="settings_keyboard_action_select_images">Select images</string>

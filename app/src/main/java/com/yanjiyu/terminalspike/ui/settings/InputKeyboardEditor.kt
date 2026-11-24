@@ -78,28 +78,38 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
             }
             if (insertion != null || (current != null && current != "input")) {
                 val canReplaceSwitch = current != "toggle" || tokens.count { it == "toggle" } > 1
-                OutlinedTextField(search, { search = it.take(40) }, singleLine = true,
-                    label = { Text(stringResource(R.string.settings_add_key)) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-                val choices = listOf("toggle") + runtimeSupportedKeyboardActions.map { it.wireCode }
-                choices.forEach { token ->
-                    val label = inputKeyboardTokenLabel(token)
-                    if ((token == "toggle" || canReplaceSwitch) && label.contains(search.trim(), ignoreCase = true)) {
-                        TextButton(onClick = {
-                            legacy = false
-                            tokens = tokens.toMutableList().apply {
-                                val at = insertion
-                                if (at != null) add(at, token) else set(requireNotNull(selected), token)
-                            }
-                            selected = null; insertion = null
-                        }, modifier = Modifier.fillMaxWidth().testTag("input-keyboard-choice-$token")) { Text(label) }
+                fun place(token: String) {
+                    legacy = false
+                    tokens = tokens.toMutableList().apply {
+                        val at = insertion
+                        if (at != null) add(at, token) else set(requireNotNull(selected), token)
                     }
+                    selected = null
+                    insertion = null
                 }
+                // The programmable key sits above the shipped actions: a chord is the only way to
+                // get Ctrl+J (line feed), Alt+Enter, and friends onto the input keyboard, and it
+                // used to be buried under the whole action list.
                 Text(
                     text = stringResource(R.string.settings_input_keyboard_chord_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
+                HorizontalChoices {
+                    listOf(
+                        stringResource(R.string.settings_input_keyboard_chord_shortcut_newline) to "C-j",
+                        "Alt+Enter" to "M-Enter",
+                        "Ctrl+[" to "C-[",
+                    ).forEach { (label, chord) ->
+                        val token = InputKeyboardLayout.chordToken(chord) ?: return@forEach
+                        AssistChip(
+                            onClick = { place(token) },
+                            label = { Text(label) },
+                            modifier = Modifier.testTag("input-keyboard-chord-shortcut-$chord"),
+                        )
+                    }
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -116,17 +126,21 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
                         enabled = InputKeyboardLayout.chordToken(chordText) != null,
                         onClick = {
                             val token = InputKeyboardLayout.chordToken(chordText) ?: return@TextButton
-                            legacy = false
-                            tokens = tokens.toMutableList().apply {
-                                val at = insertion
-                                if (at != null) add(at, token) else set(requireNotNull(selected), token)
-                            }
+                            place(token)
                             chordText = ""
-                            selected = null
-                            insertion = null
                         },
                         modifier = Modifier.testTag("input-keyboard-chord-add"),
                     ) { Text(stringResource(R.string.settings_input_keyboard_chord_add)) }
+                }
+                OutlinedTextField(search, { search = it.take(40) }, singleLine = true,
+                    label = { Text(stringResource(R.string.settings_add_key)) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+                val choices = listOf("toggle") + runtimeSupportedKeyboardActions.map { it.wireCode }
+                choices.forEach { token ->
+                    val label = inputKeyboardTokenLabel(token)
+                    if ((token == "toggle" || canReplaceSwitch) && label.contains(search.trim(), ignoreCase = true)) {
+                        TextButton(onClick = { place(token) },
+                            modifier = Modifier.fillMaxWidth().testTag("input-keyboard-choice-$token")) { Text(label) }
+                    }
                 }
             }
             TextButton(onClick = { legacy = true; tokens = defaults; selected = null; insertion = null },
