@@ -76,6 +76,10 @@ message AppSettings {
   // so an edited preset still reads as that preset.
   map<string, string> keyboard_profile_presets = 37;
 
+  // Device-local library of user-authored chord keys, shared by every keyboard deck. List order is
+  // the key order on the accessory bar; an unreadable row is dropped instead of failing the read.
+  repeated KeyboardChordEntry custom_chords = 38;
+
   // Message presence distinguishes an untouched install from an intentionally empty agent list.
   AiAgentConfiguration ai_agents = 31;
 
@@ -113,6 +117,15 @@ message KeyboardPresetDeck {
   string payload = 1;
   // User-visible name, empty for shipped presets.
   string label = 2;
+}
+
+message KeyboardChordEntry {
+  // Stable identity behind the runtime key ID; bounded to [a-z0-9-].
+  string id = 1;
+  // Key face only; never parsed for bytes.
+  string label = 2;
+  // Bounded terminal chord such as C-j or M-Enter.
+  string spec = 3;
 }
 
 message AiAgentConfiguration {

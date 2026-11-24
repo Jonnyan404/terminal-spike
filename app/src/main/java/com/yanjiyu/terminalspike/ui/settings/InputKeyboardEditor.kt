@@ -24,13 +24,20 @@ import androidx.compose.ui.unit.dp
 import com.yanjiyu.terminalspike.R
 import com.yanjiyu.terminalspike.core.model.InputKeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardAction
+import com.yanjiyu.terminalspike.core.model.KeyboardChord
 import com.yanjiyu.terminalspike.ui.ExtraKeyButton
 import com.yanjiyu.terminalspike.ui.resolve
 import com.yanjiyu.terminalspike.ui.InputKeyboardFrame
 import com.yanjiyu.terminalspike.ui.connections.ConnectionsGlyph
 
 @Composable
-internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+internal fun InputKeyboardEditor(
+    value: String,
+    onRight: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    chords: List<KeyboardChord> = emptyList(),
+) {
     val defaults = InputKeyboardLayout.defaultTokens(onRight)
     var tokens by remember(value, onRight) { mutableStateOf(InputKeyboardLayout.parse(value) ?: defaults) }
     var selected by remember { mutableStateOf<Int?>(null) }
@@ -47,7 +54,7 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
             Text(stringResource(R.string.settings_input_keyboard_edit), style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(horizontal = 16.dp))
             Text(stringResource(R.string.settings_input_keyboard_summary), modifier = Modifier.padding(horizontal = 16.dp))
-            InputKeyboardPreview(tokens, selected, onSelect = { selected = it; insertion = null }, onMove = { from, to ->
+            InputKeyboardPreview(tokens, selected, chords = chords, onSelect = { selected = it; insertion = null }, onMove = { from, to ->
                 legacy = false
                 tokens = tokens.toMutableList().apply { add(to, removeAt(from)) }
                 selected = to
@@ -63,7 +70,7 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
             }
             val current = selected?.let(tokens::getOrNull)
             if (current != null) {
-                Text(inputKeyboardTokenLabel(current), style = MaterialTheme.typography.titleMedium,
+                Text(inputKeyboardTokenLabel(current, chords), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 16.dp))
                 if (current != "input") TextButton(
                     enabled = current != "toggle" || tokens.count { it == "toggle" } > 1,
@@ -78,9 +85,11 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
                 val canReplaceSwitch = current != "toggle" || tokens.count { it == "toggle" } > 1
                 OutlinedTextField(search, { search = it.take(40) }, singleLine = true,
                     label = { Text(stringResource(R.string.settings_add_key)) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-                val choices = listOf("toggle") + runtimeSupportedKeyboardActions.map { it.wireCode }
+                // Library chords are offered here too: one authored chord, every keyboard.
+                val chordTokens = chords.mapNotNull { it.inputKeyboardToken() }.distinct()
+                val choices = listOf("toggle") + runtimeSupportedKeyboardActions.map { it.wireCode } + chordTokens
                 choices.forEach { token ->
-                    val label = inputKeyboardTokenLabel(token)
+                    val label = inputKeyboardTokenLabel(token, chords)
                     if ((token == "toggle" || canReplaceSwitch) && label.contains(search.trim(), ignoreCase = true)) {
                         TextButton(onClick = {
                             legacy = false
@@ -100,10 +109,10 @@ internal fun InputKeyboardEditor(value: String, onRight: Boolean, onDismiss: () 
 }
 
 @Composable
-internal fun inputKeyboardTokenLabel(token: String): String {
+internal fun inputKeyboardTokenLabel(token: String, chords: List<KeyboardChord> = emptyList()): String {
     val chord = InputKeyboardLayout.chordSpec(token)
     return if (chord != null) {
-        chord
+        chords.firstOrNull { it.spec == chord }?.label ?: chord
     } else {
         when (token) {
             "input" -> stringResource(R.string.settings_input_keyboard_field)
@@ -118,7 +127,13 @@ internal fun inputKeyboardTokenLabel(token: String): String {
 
 /** Uses the same measured frame and button renderer as the terminal, including two-row columns. */
 @Composable
-internal fun InputKeyboardPreview(tokens: List<String>, selected: Int?, onSelect: (Int) -> Unit, onMove: (Int, Int) -> Unit) {
+internal fun InputKeyboardPreview(
+    tokens: List<String>,
+    selected: Int?,
+    onSelect: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+    chords: List<KeyboardChord> = emptyList(),
+) {
     val bounds = remember { mutableMapOf<Int, Rect>() }
     var origin by remember { mutableStateOf(Offset.Zero) }
     val currentMove by rememberUpdatedState(onMove)
@@ -166,7 +181,7 @@ internal fun InputKeyboardPreview(tokens: List<String>, selected: Int?, onSelect
                     },
                 )
             }, key = { index, token, modifier ->
-                ExtraKeyButton(label = inputKeyboardTokenLabel(token), description = inputKeyboardTokenLabel(token),
+                ExtraKeyButton(label = inputKeyboardTokenLabel(token, chords), description = inputKeyboardTokenLabel(token, chords),
                     glyph = if (token == "toggle") ConnectionsGlyph.WRITE else null,
                     onClick = { onSelect(index) }, modifier = itemModifier(index, modifier))
             }, input = { index, modifier ->

@@ -49,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yanjiyu.terminalspike.R
 import com.yanjiyu.terminalspike.core.model.KeyboardAction
+import com.yanjiyu.terminalspike.core.model.KeyboardChord
+import com.yanjiyu.terminalspike.core.model.KeyboardChordLibrary
 import com.yanjiyu.terminalspike.core.model.KeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardProfile
 import com.yanjiyu.terminalspike.ui.TerminalShortcutEditorKey
@@ -72,6 +74,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
         state.preferences.inputKeyboardLayout, state.preferences.inputButtonsOnRight,
         onDismiss = { editInputKeys = false },
         onSave = { actions.onInputKeyboardLayout(it); editInputKeys = false },
+        chords = state.customChords,
         )
         return
     }
@@ -147,6 +150,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                 KeyboardDeckPreview(
                     profile = profile,
                     buttonColors = state.buttonColors,
+                    chords = state.customChords,
                     onKeyClick = { index -> replacementIndex = index },
                     onEditKeys = { editKeys = true },
                 )
@@ -155,7 +159,11 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 ) { Text(stringResource(R.string.settings_edit_keyboard_keys)) }
                 Text(
-                    text = stringResource(R.string.settings_keyboard_key_count, profile.orderedActions.size, profile.layout.rowCount),
+                    text = stringResource(
+                        R.string.settings_keyboard_key_count,
+                        profile.orderedActions.size + state.customChords.size,
+                        profile.layout.rowCount,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
@@ -202,7 +210,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                 InputKeyboardPreview(inputTokens, selected = null,
                     onSelect = { editInputKeys = true }, onMove = { from, to ->
                         actions.onInputKeyboardLayout(inputTokens.toMutableList().apply { add(to, removeAt(from)) }.joinToString(","))
-                    })
+                    }, chords = state.customChords)
                 Button(onClick = { editInputKeys = true }, modifier = Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.settings_input_keyboard_edit))
                 }
@@ -249,6 +257,11 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
             initialActions = profile.orderedActions,
             buttonColors = state.buttonColors,
             rowCount = profile.layout.rowCount,
+            chords = state.customChords,
+            onChordCreate = actions.onKeyboardChordCreate,
+            onChordUpdate = actions.onKeyboardChordUpdate,
+            onChordDelete = actions.onKeyboardChordDelete,
+            onChordMove = actions.onKeyboardChordMove,
             onDismiss = { editKeys = false },
             onSave = {
                 editKeys = false
@@ -367,10 +380,12 @@ internal const val KeyboardPreviewKeyTestTagPrefix = "keyboard-preview-key-"
 private fun KeyboardDeckPreview(
     profile: KeyboardProfile,
     buttonColors: Map<String, String>,
+    chords: List<KeyboardChord>,
     onKeyClick: (Int) -> Unit,
     onEditKeys: () -> Unit,
 ) {
-    val runtimeActions = profile.toRuntimeAccessoryActionsOrNull().orEmpty()
+    val runtimeActions = profile.toRuntimeAccessoryActionsOrNull().orEmpty() +
+        chords.toAccessoryActions()
     Box(Modifier.fillMaxWidth().testTag(KeyboardPreviewTestTag)) {
         TerminalShortcutPreview(
             actions = runtimeActions,
@@ -519,6 +534,11 @@ private fun KeyboardActionsDialog(
     initialActions: List<KeyboardAction>,
     buttonColors: Map<String, String>,
     rowCount: Int,
+    chords: List<KeyboardChord>,
+    onChordCreate: (String, String) -> Unit,
+    onChordUpdate: (String, String, String) -> Unit,
+    onChordDelete: (String) -> Unit,
+    onChordMove: (String, Int) -> Unit,
     onDismiss: () -> Unit,
     onSave: (List<KeyboardAction>) -> Unit,
 ) {
@@ -551,6 +571,13 @@ private fun KeyboardActionsDialog(
                     onMove = { action, move ->
                         actions = actions.moveStableAction(action.wireCode, move)
                     },
+                )
+                KeyboardChordSection(
+                    chords = chords,
+                    onCreate = onChordCreate,
+                    onUpdate = onChordUpdate,
+                    onDelete = onChordDelete,
+                    onMove = onChordMove,
                 )
                 OutlinedTextField(
                     value = search,
@@ -604,6 +631,222 @@ private fun KeyboardActionsDialog(
             )
         }
     }
+}
+
+internal const val KeyboardChordSectionTestTag = "keyboard-chord-section"
+internal const val KeyboardChordListTestTag = "keyboard-chord-list"
+internal const val KeyboardChordRowTestTagPrefix = "keyboard-chord-row-"
+internal const val KeyboardChordAddTestTag = "keyboard-chord-add"
+internal const val KeyboardChordNameFieldTestTag = "keyboard-chord-name"
+internal const val KeyboardChordSpecFieldTestTag = "keyboard-chord-spec"
+internal const val KeyboardChordSaveTestTag = "keyboard-chord-save"
+
+/**
+ * The chord library lives inside the deck editor: authoring a chord and placing it on the bar is
+ * one task, and the library is device-wide so the input keyboard offers the same entries.
+ */
+@Composable
+private fun KeyboardChordSection(
+    chords: List<KeyboardChord>,
+    onCreate: (String, String) -> Unit,
+    onUpdate: (String, String, String) -> Unit,
+    onDelete: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
+) {
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxWidth().testTag(KeyboardChordSectionTestTag),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.settings_keyboard_chord_heading),
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text(
+            text = stringResource(R.string.settings_keyboard_chord_summary),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp).testTag(KeyboardChordListTestTag),
+        ) {
+            if (chords.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.settings_keyboard_chord_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            items(chords, key = { chord -> chord.id }) { chord ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clickable(role = Role.Button) { editingId = chord.id }
+                        .padding(horizontal = 4.dp)
+                        .testTag(KeyboardChordRowTestTagPrefix + chord.id),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = chord.label,
+                        modifier = Modifier.weight(1f),
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = chord.spec,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item {
+                TextButton(
+                    onClick = { creating = true },
+                    enabled = chords.size < KeyboardChordLibrary.MAX_CHORDS,
+                    modifier = Modifier.testTag(KeyboardChordAddTestTag),
+                ) {
+                    Text(
+                        stringResource(
+                            if (chords.size < KeyboardChordLibrary.MAX_CHORDS) {
+                                R.string.settings_keyboard_chord_add
+                            } else {
+                                R.string.settings_keyboard_chord_full
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+    }
+    if (creating) {
+        KeyboardChordEditorDialog(
+            initial = null,
+            canMoveUp = false,
+            canMoveDown = false,
+            onDismiss = { creating = false },
+            onSave = { label, spec ->
+                creating = false
+                onCreate(label, spec)
+            },
+        )
+    }
+    val editing = chords.firstOrNull { it.id == editingId }
+    if (editing != null) {
+        val index = chords.indexOf(editing)
+        KeyboardChordEditorDialog(
+            initial = editing,
+            canMoveUp = index > 0,
+            canMoveDown = index >= 0 && index < chords.lastIndex,
+            onDismiss = { editingId = null },
+            onSave = { label, spec ->
+                editingId = null
+                onUpdate(editing.id, label, spec)
+            },
+            onDelete = {
+                editingId = null
+                onDelete(editing.id)
+            },
+            onMoveUp = { onMove(editing.id, -1) },
+            onMoveDown = { onMove(editing.id, 1) },
+        )
+    }
+}
+
+@Composable
+private fun KeyboardChordEditorDialog(
+    initial: KeyboardChord?,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onDelete: (() -> Unit)? = null,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
+) {
+    var label by remember(initial) { mutableStateOf(initial?.label.orEmpty()) }
+    var spec by remember(initial) { mutableStateOf(initial?.spec.orEmpty()) }
+    val normalized = KeyboardChordLibrary.normalizeSpec(spec)
+    AppDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (initial == null) {
+                        R.string.settings_keyboard_chord_create_title
+                    } else {
+                        R.string.settings_keyboard_chord_edit_title
+                    },
+                ),
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.take(KeyboardChordLibrary.MAX_LABEL_LENGTH) },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.settings_keyboard_chord_name_label)) },
+                    modifier = Modifier.fillMaxWidth().testTag(KeyboardChordNameFieldTestTag),
+                )
+                OutlinedTextField(
+                    value = spec,
+                    onValueChange = { spec = it.take(24) },
+                    singleLine = true,
+                    isError = spec.isNotBlank() && normalized == null,
+                    label = { Text(stringResource(R.string.settings_keyboard_chord_spec_label)) },
+                    modifier = Modifier.fillMaxWidth().testTag(KeyboardChordSpecFieldTestTag),
+                )
+                Text(
+                    text = stringResource(R.string.settings_keyboard_chord_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (spec.isNotBlank() && normalized == null) {
+                    Text(
+                        text = stringResource(R.string.settings_keyboard_chord_invalid),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (onMoveUp != null || onMoveDown != null || onDelete != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (onMoveUp != null) {
+                            TextButton(onClick = onMoveUp, enabled = canMoveUp) {
+                                Text(stringResource(R.string.settings_keyboard_chord_move_up))
+                            }
+                        }
+                        if (onMoveDown != null) {
+                            TextButton(onClick = onMoveDown, enabled = canMoveDown) {
+                                Text(stringResource(R.string.settings_keyboard_chord_move_down))
+                            }
+                        }
+                        if (onDelete != null) {
+                            TextButton(onClick = onDelete) {
+                                Text(stringResource(R.string.remove))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { normalized?.let { onSave(label, it) } },
+                enabled = normalized != null,
+                modifier = Modifier.testTag(KeyboardChordSaveTestTag),
+            ) { Text(stringResource(R.string.save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+        },
+    )
 }
 
 @Composable

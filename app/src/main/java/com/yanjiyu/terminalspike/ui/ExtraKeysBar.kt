@@ -119,6 +119,7 @@ import com.yanjiyu.terminalspike.ui.connections.ConnectionsGlyph
 import com.yanjiyu.terminalspike.ui.connections.ConnectionsGlyphIcon
 import com.yanjiyu.terminalspike.ui.settings.KeyboardKeyReplacementDialog
 import com.yanjiyu.terminalspike.ui.settings.replaceKeyboardActionAt
+import com.yanjiyu.terminalspike.ui.settings.isLibraryChordKey
 import com.yanjiyu.terminalspike.ui.settings.toInputAccessoryAction
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -255,7 +256,12 @@ fun TerminalAccessoryBar(
             onDismiss = { replacementTarget = null },
             onSelect = { replacement ->
                 if (replacement != editableActions[index]) {
-                    onReplaceActions?.invoke(actions, replaceKeyboardActionAt(editableActions, index, replacement))
+                    // Hand back the deck without the appended chords: the writer compares it with
+                    // the persisted profile to reject a stale picker.
+                    onReplaceActions?.invoke(
+                        actions.filterNot { it.isLibraryChordKey },
+                        replaceKeyboardActionAt(editableActions, index, replacement),
+                    )
                 }
                 replacementTarget = null
             },
@@ -322,13 +328,18 @@ fun TerminalAccessoryBar(
                 val columnCount = (terminalShortcutColumnCount(maxWidth.value) - 1).coerceAtLeast(1)
                 val keyWidth = terminalAccessoryKeyWidth(maxWidth)
                 val rowCount = layout.rowCount
-                val displayedActions = displayedAccessoryActions(actions)
-                val shortcutActions = displayedActions.drop(1).filterNot {
-                    actions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
-                }
+                // Library chords ride at the end of every deck; the default-layout pass looks only
+                // at the deck so one added chord cannot change how all the other keys are laid out.
+                val deckActions = actions.filterNot { it.isLibraryChordKey }
+                val chordActions = actions.filter { it.isLibraryChordKey }
+                val displayedDeck = displayedAccessoryActions(deckActions)
+                val displayedActions = displayedDeck + chordActions
+                val shortcutActions = displayedDeck.drop(1).filterNot {
+                    deckActions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
+                } + chordActions
                 val shortcutPages = terminalAccessoryPages(
                     shortcutActions, columnCount, rowCount,
-                    customizationEnabled && !actions.matchDefaultAccessoryDeck(),
+                    customizationEnabled && !deckActions.matchDefaultAccessoryDeck(),
                 )
                 val inputPageCount = if (bufferedInputMode) 1 else shortcutPages.size
                 val pagerState = rememberPagerState { inputPageCount + if (snippetsContent != null && !pinSnippets) 1 else 0 }
@@ -601,12 +612,14 @@ internal fun TerminalShortcutPreview(
         BoxWithConstraints(Modifier.fillMaxWidth().height(106.dp)) {
             val columns = (terminalShortcutColumnCount(maxWidth.value) - 1).coerceAtLeast(1)
             val keyWidth = terminalAccessoryKeyWidth(maxWidth)
-            val displayedActions = displayedAccessoryActions(actions)
+            val deckActions = actions.filterNot { it.isLibraryChordKey }
+            val chordActions = actions.filter { it.isLibraryChordKey }
+            val displayedActions = displayedAccessoryActions(deckActions) + chordActions
             val shortcuts = displayedActions.drop(1).filterNot {
-                actions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
+                deckActions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
             }
             val pages = terminalAccessoryPages(shortcuts, columns, layout.rowCount,
-                !actions.matchDefaultAccessoryDeck())
+                !deckActions.matchDefaultAccessoryDeck())
             val pager = rememberPagerState { pages.size }
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 ShortcutDeckPage(
@@ -1444,11 +1457,18 @@ internal fun rememberTerminalKeyboardVisible(insets: WindowInsets = WindowInsets
     }.value
 }
 
-/** Materialize the visible shipped deck before editing so other keys stay in place. */
-internal fun editableAccessoryKeyboardActions(actions: List<TerminalAccessoryAction>): List<KeyboardAction> =
-    displayedAccessoryActions(actions).filterNot {
-        actions.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
+/**
+ * Materialize the visible shipped deck before editing so other keys stay in place.
+ *
+ * Library chords are filtered out: they are not keyboard actions, so they cannot be replaced from
+ * the deck editor and must not be projected through the enum.
+ */
+internal fun editableAccessoryKeyboardActions(actions: List<TerminalAccessoryAction>): List<KeyboardAction> {
+    val deck = actions.filterNot { it.isLibraryChordKey }
+    return displayedAccessoryActions(deck).filterNot {
+        deck.matchDefaultAccessoryDeck() && it.defaultDeckKeyOrNull() == TerminalExtraKey.TAB
     }.map { requireNotNull(accessoryKeyboardAction(it)) }
+}
 
 private fun accessoryKeyboardAction(action: TerminalAccessoryAction): KeyboardAction? {
     fun identity(value: TerminalAccessoryAction): Any = when (value) {

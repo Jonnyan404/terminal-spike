@@ -6,6 +6,9 @@ import com.yanjiyu.terminalspike.core.data.migration.LegacyIds
 import com.yanjiyu.terminalspike.core.data.settings.CURRENT_KEYBOARD_DECK_REVISION
 import com.yanjiyu.terminalspike.core.data.settings.AppSettings
 import com.yanjiyu.terminalspike.core.model.KeyboardAction
+import com.yanjiyu.terminalspike.core.model.KeyboardChord
+import com.yanjiyu.terminalspike.core.model.KeyboardChordLibrary
+import com.yanjiyu.terminalspike.core.model.InputKeyboardLayout
 import com.yanjiyu.terminalspike.core.model.CustomTerminalTheme
 import com.yanjiyu.terminalspike.core.model.KeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardProfile
@@ -219,6 +222,8 @@ internal data class SettingsUiState(
     /** User-created presets, in creation order. Their decks live in the preset store. */
     val keyboardCustomPresets: List<KeyboardPresetLabel> = emptyList(),
     val keyboardSelectedPresetId: String = KeyboardPresets.general.id,
+    /** Shared chord library, in bar order; appended after the deck keys on every keyboard. */
+    val customChords: List<KeyboardChord> = emptyList(),
     val profilesLoading: Boolean = true,
     val writeInProgress: Boolean = false,
     @StringRes val message: Int? = null,
@@ -689,6 +694,37 @@ internal fun KeyboardProfile.toRuntimeAccessoryActionsOrNull(): List<TerminalAcc
 
 internal fun toInputAccessoryAction(action: KeyboardAction): TerminalAccessoryAction? =
     action.toRuntimeAccessoryActionOrNull(KeyboardProfile.DEFAULT_TMUX_PREFIX)
+
+/**
+ * Key face for a library chord. A chord is fixed by definition, so it never consumes an armed
+ * modifier: it always emits exactly the combination the user authored.
+ */
+internal fun KeyboardChord.toAccessoryAction(): TerminalAccessoryAction.TmuxPrefix =
+    TerminalAccessoryAction.TmuxPrefix(
+        chord = spec,
+        stableId = "chord:$id",
+        customLabel = label.ifBlank { spec },
+    )
+
+internal fun List<KeyboardChord>.toAccessoryActions(): List<TerminalAccessoryAction> =
+    map { it.toAccessoryAction() }
+
+/**
+ * Chords are appended to a deck rather than stored in it. Decks that render the shipped default
+ * layout must ignore them, otherwise adding one chord would silently end the default-layout pass.
+ */
+internal val TerminalAccessoryAction.isLibraryChordKey: Boolean
+    get() = this is TerminalAccessoryAction.TmuxPrefix && customLabel != null
+
+/** Token the input keyboard stores for this chord; null when the spec no longer parses. */
+internal fun KeyboardChord.inputKeyboardToken(): String? = InputKeyboardLayout.chordToken(spec)
+
+/** Tolerant read of the device-local chord library; unreadable rows are dropped, never fatal. */
+internal fun AppSettings.chordLibrary(): List<KeyboardChord> = KeyboardChordLibrary.decode(
+    customChordsList.map { entry ->
+        KeyboardChordLibrary.Row(id = entry.id, label = entry.label, spec = entry.spec)
+    },
+)
 
 private fun KeyboardAction.toRuntimeAccessoryActionOrNull(
     tmuxPrefix: String,

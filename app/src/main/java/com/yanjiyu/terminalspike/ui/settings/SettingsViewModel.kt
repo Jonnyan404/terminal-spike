@@ -11,11 +11,14 @@ import com.yanjiyu.terminalspike.core.data.repository.SettingsMutationScope
 import com.yanjiyu.terminalspike.core.data.settings.AppSettings
 import com.yanjiyu.terminalspike.core.data.migration.LegacyIds
 import com.yanjiyu.terminalspike.core.data.settings.CURRENT_KEYBOARD_DECK_REVISION
+import com.yanjiyu.terminalspike.core.data.settings.KeyboardChordEntry
 import com.yanjiyu.terminalspike.core.data.settings.KeyboardPresetDeck
 import com.yanjiyu.terminalspike.core.model.BellSettings
 import com.yanjiyu.terminalspike.core.model.CursorStyle
 import com.yanjiyu.terminalspike.core.model.CustomTerminalTheme
 import com.yanjiyu.terminalspike.core.model.KeyboardAction
+import com.yanjiyu.terminalspike.core.model.KeyboardChord
+import com.yanjiyu.terminalspike.core.model.KeyboardChordLibrary
 import com.yanjiyu.terminalspike.core.model.KeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardProfile
 import com.yanjiyu.terminalspike.core.model.LinkBehavior
@@ -97,6 +100,7 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
                     val presetDecks = settings.keyboardPresetsMap.mapValues { (_, entry) ->
                         KeyboardPresetStore.Deck(payload = entry.payload, label = entry.label)
                     }
+                    val customChords = settings.chordLibrary()
                     SettingsUiState(
                         preferences = settings.toPreferences(),
                         buttonColors = settings.buttonColorsMap,
@@ -119,6 +123,7 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
                                 decks = presetDecks,
                             )
                         } ?: KeyboardPresets.general.id,
+                        customChords = customChords,
                         profilesLoading = false,
                     )
                 }.collect { loaded ->
@@ -464,6 +469,38 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
     fun updateKeyboardActions(actions: List<KeyboardAction>) =
         updateKeyboardProfile { it.copy(orderedActions = actions) }
 
+    /**
+     * Chord library writes are device-local: they never touch the keyboard profile, so switching
+     * presets keeps the same chords on every deck. Invalid input is rejected before it is stored.
+     */
+    fun createKeyboardChord(label: String, spec: String) = mutate {
+        val current = container.settings.settings.first().chordLibrary()
+        val next = KeyboardChordLibrary.add(
+            chords = current,
+            label = label,
+            spec = spec,
+            seedEpochMillis = System.currentTimeMillis(),
+        ) ?: throw IllegalArgumentException("The chord library rejected a new entry.")
+        persistChords(next)
+    }
+
+    fun updateKeyboardChord(id: String, label: String, spec: String) = mutate {
+        val current = container.settings.settings.first().chordLibrary()
+        val next = KeyboardChordLibrary.update(current, id, label, spec)
+            ?: throw IllegalArgumentException("The chord library rejected an update.")
+        persistChords(next)
+    }
+
+    fun deleteKeyboardChord(id: String) = mutate {
+        val current = container.settings.settings.first().chordLibrary()
+        persistChords(KeyboardChordLibrary.remove(current, id))
+    }
+
+    fun moveKeyboardChord(id: String, delta: Int) = mutate {
+        val current = container.settings.settings.first().chordLibrary()
+        persistChords(KeyboardChordLibrary.move(current, id, delta))
+    }
+
     fun updateKeyboardLayout(layout: KeyboardLayout) =
         updateKeyboardProfile { it.copy(layout = layout) }
 
@@ -598,6 +635,21 @@ internal class SettingsViewModel(application: Application) : AndroidViewModel(ap
                 )
             }
             builder.putKeyboardProfilePresets(profileId, selectedPresetId)
+        }
+    }
+
+    private suspend fun SettingsMutationScope.persistChords(chords: List<KeyboardChord>) = write {
+        container.settings.update { builder ->
+            builder.clearCustomChords()
+            chords.forEach { chord ->
+                builder.addCustomChords(
+                    KeyboardChordEntry.newBuilder()
+                        .setId(chord.id)
+                        .setLabel(chord.label)
+                        .setSpec(chord.spec)
+                        .build(),
+                )
+            }
         }
     }
 

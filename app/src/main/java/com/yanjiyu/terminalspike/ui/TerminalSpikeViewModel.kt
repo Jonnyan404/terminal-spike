@@ -46,6 +46,7 @@ import com.yanjiyu.terminalspike.core.model.ConnectionProtocol
 import com.yanjiyu.terminalspike.core.model.BellSettings
 import com.yanjiyu.terminalspike.core.model.HostProfile
 import com.yanjiyu.terminalspike.core.model.KeyboardAction
+import com.yanjiyu.terminalspike.core.model.KeyboardChord
 import com.yanjiyu.terminalspike.core.model.KeyboardLayout
 import com.yanjiyu.terminalspike.core.model.KeyboardProfile
 import com.yanjiyu.terminalspike.core.model.ModelLimits
@@ -115,6 +116,8 @@ import com.yanjiyu.terminalspike.ui.connections.JschHostConnectionTester
 import com.yanjiyu.terminalspike.ui.connections.KeyGenerationRequest
 import com.yanjiyu.terminalspike.ui.connections.PreparedHostConnectionTest
 import com.yanjiyu.terminalspike.ui.connections.buildConnectionsReadyState
+import com.yanjiyu.terminalspike.ui.settings.chordLibrary
+import com.yanjiyu.terminalspike.ui.settings.toAccessoryActions
 import com.yanjiyu.terminalspike.ui.settings.toRuntimeExtraKeysOrNull
 import com.yanjiyu.terminalspike.ui.settings.toRuntimeAccessoryActionsOrNull
 import com.yanjiyu.terminalspike.ui.settings.defaultRuntimeAccessoryActions
@@ -537,6 +540,8 @@ data class TerminalSpikeUiState(
     val accessoryActions: List<TerminalAccessoryAction> =
         defaultRuntimeAccessoryActions(),
     val keyboardRuntimeCompatible: Boolean = true,
+    /** Device-local chord library; appended after the deck keys, in library order. */
+    val customChords: List<KeyboardChord> = emptyList(),
     val runtimeProfilesReady: Boolean = false,
     val keyboardLayout: KeyboardLayout = KeyboardLayout.TWO_ROWS,
     val modifierBehavior: ModifierBehavior = ModifierBehavior.ONE_SHOT,
@@ -1825,7 +1830,9 @@ class TerminalSpikeViewModel(
                         )
                         _uiState.update { state ->
                             withRuntimeKeyboardProfile(
-                                state = state,
+                                state = state.copy(
+                                    customChords = snapshot.appSettings.chordLibrary(),
+                                ),
                                 keyboard = keyboardProfileForSession(state, state.activeSessionId),
                             ).copy(
                                 runtimeProfilesReady = true,
@@ -1866,7 +1873,11 @@ class TerminalSpikeViewModel(
         state: TerminalSpikeUiState,
         keyboard: KeyboardProfile?,
     ): TerminalSpikeUiState {
-        val runtimeActions = keyboard?.toRuntimeAccessoryActionsOrNull()
+        val deckActions = keyboard?.toRuntimeAccessoryActionsOrNull()
+        // Chords are library-wide, not profile-wide, so they ride along with every deck and stay
+        // on the bar when the user switches presets or session keyboard overrides.
+        val runtimeActions = (deckActions ?: defaultRuntimeAccessoryActions()) +
+            state.customChords.toAccessoryActions()
         val runtimeKeys = keyboard?.toRuntimeExtraKeysOrNull()
         val modifierBehavior = keyboard?.modifierBehavior ?: ModifierBehavior.ONE_SHOT
         val modifierBehaviorChanged = state.modifierBehavior != modifierBehavior
@@ -1877,9 +1888,8 @@ class TerminalSpikeViewModel(
         }
         return state.copy(
             extraKeys = runtimeKeys ?: TerminalExtraKey.DEFAULT_ORDER,
-            accessoryActions = runtimeActions
-                ?: defaultRuntimeAccessoryActions(),
-            keyboardRuntimeCompatible = runtimeActions != null,
+            accessoryActions = runtimeActions,
+            keyboardRuntimeCompatible = deckActions != null,
             keyboardLayout = keyboard?.layout ?: KeyboardLayout.TWO_ROWS,
             modifierBehavior = modifierBehavior,
             ctrlArmed = if (modifierBehaviorChanged) false else state.ctrlArmed,
