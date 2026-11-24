@@ -2266,6 +2266,19 @@ class TerminalSpikeViewModel(
         }
     }
 
+    /** True when this saved host already has a password the editor could keep instead of a new one. */
+    private fun hasSavedPassword(catalog: TerminalDataCatalog, persistentId: String?): Boolean {
+        if (persistentId == null) return false
+        val credentialId = catalog.hosts
+            .firstOrNull { it.profile.id == persistentId }
+            ?.profile
+            ?.credentialId
+            ?: return false
+        return catalog.credentials
+            .firstOrNull { it.id == credentialId }
+            ?.savedSecretAvailability == CatalogSecretAvailability.AVAILABLE
+    }
+
     /** Saves the complete UUID-backed host aggregate; transient editor secrets never enter state. */
     internal suspend fun saveConnectionsHost(submission: HostEditorSubmission): Result<Unit> {
         val catalog = connectionsCatalogLoad.value?.catalog
@@ -2292,6 +2305,10 @@ class TerminalSpikeViewModel(
                 HostAuthenticationMethod.PASSWORD -> when {
                     submission.savePassword && submission.secret.isNotEmpty() ->
                         HostAuthenticationUpdate.SavePassword(submission.secret.toUtf8Secret())
+                    // Saving with a blank field is an intentional empty password unless an earlier
+                    // password is already stored for this endpoint.
+                    submission.savePassword && !hasSavedPassword(catalog, persistentId) ->
+                        HostAuthenticationUpdate.SavePassword(ByteArray(0))
                     submission.savePassword -> HostAuthenticationUpdate.RetainSavedPassword
                     else -> HostAuthenticationUpdate.PromptPassword
                 }
@@ -2924,11 +2941,8 @@ class TerminalSpikeViewModel(
                     SshAuthentication.StoredPassword {
                         terminalDataRepository.copyCredentialSecret(credential.id)
                     }
-                else -> return HostConnectionTestResult.Failed(
-                    ConnectionTestStage.AUTHENTICATION,
-                    uiText(R.string.connections_test_enter_password),
-                    emptySet(),
-                )
+                // A blank field is a deliberate empty password, so test it instead of refusing.
+                else -> SshAuthentication.Password(ByteArray(0))
             }
             HostAuthenticationMethod.KEYBOARD_INTERACTIVE -> when {
                 inputSecret.isNotEmpty() ->

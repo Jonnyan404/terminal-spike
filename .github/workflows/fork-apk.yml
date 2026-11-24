@@ -51,14 +51,24 @@ jobs:
           "$SDKMANAGER" --list_installed | sed -n '1,60p'
           df -h /
 
+      # A fresh key on every run made each APK un-installable over the previous one
+      # (INSTALL_FAILED_UPDATE_INCOMPATIBLE). Cache one fork key so updates keep their data.
+      - name: Restore the fork debug keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: fork-debug-keystore-v1
+
       - name: Create the debug keystore the fork build signs with
         run: |
           mkdir -p "$HOME/.android"
-          keytool -genkeypair -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Build the fork debug APK
         run: |

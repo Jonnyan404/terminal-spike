@@ -119,7 +119,9 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                 )
                 // Preset actions belong under the chips: keeping the restore button inside the
                 // preset block means it is visible without scrolling to the bottom of the page.
+                // Restore only appears once the deck actually differs from the preset's defaults.
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val shippedPreset = KeyboardPresets.shipped(selectedPresetId)
                     if (selectedCustomPreset != null) {
                         TextButton(onClick = { renamePresetRequested = true }) {
                             Text(stringResource(R.string.settings_keyboard_preset_rename))
@@ -127,7 +129,7 @@ internal fun KeyboardSettings(state: SettingsUiState, actions: SettingsActions) 
                         TextButton(onClick = { deletePresetRequested = true }) {
                             Text(stringResource(R.string.settings_keyboard_preset_delete))
                         }
-                    } else if (KeyboardPresets.shipped(selectedPresetId) != null) {
+                    } else if (shippedPreset != null && !shippedPreset.matches(profile)) {
                         TextButton(
                             onClick = { resetRequested = true },
                             modifier = Modifier.testTag(KeyboardPresetRestoreTestTag),

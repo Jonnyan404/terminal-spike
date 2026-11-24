@@ -489,7 +489,8 @@ internal class TerminalDataRepository(
                 }
 
                 is HostAuthenticationUpdate.SavePassword -> {
-                    require(authentication.secret.isNotEmpty()) { "A saved password must not be empty." }
+                    // An empty password is a legitimate credential: some servers accept it and the
+                    // user explicitly opted to save what they typed.
                     val existingPassword = existingCredential
                         ?.takeIf { it.authentication is SshAuthentication.Password }
                         ?.takeIf { existing.sameAuthenticationEndpointAs(base) }

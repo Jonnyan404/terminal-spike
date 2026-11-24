@@ -280,7 +280,7 @@
     <string name="settings_keyboard_move_before">向前移动</string>
     <string name="settings_keyboard_move_after">向后移动</string>
     <string name="settings_keyboard_drag_description">拖动以调整 %1$s 的顺序</string>
-    <string name="settings_restore_keyboard_preset">还原此预设的默认键位</string>
+    <string name="settings_restore_keyboard_preset">恢复默认键位</string>
     <string name="settings_reset_keyboard_title">还原默认键位？</string>
     <string name="settings_reset_keyboard_message">将此预设的键位恢复为出厂设置，其它预设不受影响。</string>
     <string name="settings_add_key">查找要添加的操作</string>

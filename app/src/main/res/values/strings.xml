@@ -283,7 +283,7 @@
     <string name="settings_keyboard_move_before">Move before</string>
     <string name="settings_keyboard_move_after">Move after</string>
     <string name="settings_keyboard_drag_description">Drag to reorder %1$s</string>
-    <string name="settings_restore_keyboard_preset">Restore this preset\'s defaults</string>
+    <string name="settings_restore_keyboard_preset">Restore defaults</string>
     <string name="settings_reset_keyboard_title">Restore the default keys?</string>
     <string name="settings_reset_keyboard_message">Replace this preset\'s keys with the ones it ships with. Your other presets are untouched.</string>
     <string name="settings_add_key">Find an action to add</string>

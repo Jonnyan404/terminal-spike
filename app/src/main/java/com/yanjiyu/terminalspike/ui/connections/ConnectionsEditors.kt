@@ -207,10 +207,8 @@ internal fun HostEditorDialog(
             HostAuthenticationMethod.PASSWORD -> when {
                 transientSecretNeedsReentry ->
                     uiText(R.string.host_editor_secret_reenter_password)
-                forTest && !secretState.hasValue && !savedSecretAvailable ->
-                    uiText(R.string.host_editor_password_test_required)
-                !forTest && savePassword && !secretState.hasValue && !savedSecretAvailable ->
-                    uiText(R.string.host_editor_password_save_required)
+                // A blank field is a deliberate empty password, not a missing one: keep both the
+                // test and the save path usable for servers that accept an empty password.
                 !forTest && savePassword && !secretState.hasValue && savedSecretAvailable &&
                     authenticationEndpointChanged(initial, draft) ->
                     uiText(R.string.host_editor_password_endpoint_changed)
