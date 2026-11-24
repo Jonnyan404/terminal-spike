@@ -160,14 +160,18 @@ class AesGcmCredentialStore(
     }
 
     private fun validatePlaintextSize(reference: CredentialSecretReference, size: Int) {
-        if (size !in 1..reference.kind.maximumPlaintextBytes) {
+        // An SSH password may legitimately be empty, and a missing secret is a null reference
+        // rather than a zero-length value, so an empty stored password stays distinguishable.
+        val minimum = if (reference.kind == CredentialSecretKind.PASSWORD) 0 else 1
+        if (size !in minimum..reference.kind.maximumPlaintextBytes) {
             throw malformed(reference, MalformedCredentialReason.PLAINTEXT_SIZE)
         }
     }
 
     private fun validateCiphertextSize(reference: CredentialSecretReference, size: Int) {
         val maximum = reference.kind.maximumPlaintextBytes + TAG_BYTES
-        if (size !in (TAG_BYTES + 1)..maximum) {
+        val minimum = if (reference.kind == CredentialSecretKind.PASSWORD) TAG_BYTES else TAG_BYTES + 1
+        if (size !in minimum..maximum) {
             throw malformed(reference, MalformedCredentialReason.CIPHERTEXT_SIZE)
         }
     }
