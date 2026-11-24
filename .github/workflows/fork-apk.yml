@@ -37,14 +37,19 @@ jobs:
             17
             25
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Install required SDK packages
         run: |
-          sdkmanager --install "platforms;android-37.0"
-          sdkmanager --install "ndk;29.0.14206865"
-          sdkmanager --list_installed | sed -n '1,60p'
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --install "platforms;android-37.0"
+          "$SDKMANAGER" --install "ndk;29.0.14206865"
+          "$SDKMANAGER" --list_installed | sed -n '1,60p'
+          df -h /
 
       - name: Create the debug keystore the fork build signs with
         run: |
