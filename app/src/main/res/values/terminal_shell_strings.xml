@@ -205,7 +205,7 @@
     <string name="settings_keyboard_action_insert">Ins</string>
     <string name="settings_keyboard_action_delete">Del</string>
     <string name="settings_keyboard_action_enter">Enter</string>
-    <string name="settings_keyboard_action_newline">Newline · Ctrl+J (LF)</string>
+    <string name="settings_keyboard_action_newline">Newline</string>
     <string name="settings_keyboard_action_tmux">tmux</string>
     <string name="settings_keyboard_action_paste">Paste</string>
     <string name="settings_keyboard_action_select_images">Select images</string>

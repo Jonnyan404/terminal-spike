@@ -199,7 +199,7 @@
     <string name="settings_keyboard_action_insert">Ins</string>
     <string name="settings_keyboard_action_delete">Del</string>
     <string name="settings_keyboard_action_enter">Enter</string>
-    <string name="settings_keyboard_action_newline">换行 · Ctrl+J (LF)</string>
+    <string name="settings_keyboard_action_newline">换行</string>
     <string name="settings_keyboard_action_tmux">tmux</string>
     <string name="settings_keyboard_action_paste">粘贴</string>
     <string name="settings_keyboard_action_select_images">选择图片</string>
