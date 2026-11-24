@@ -73,8 +73,8 @@ internal object KeyboardPresetMemory {
     fun hasSavedDeck(memory: String): Boolean = memory.isNotEmpty()
 
     /**
-     * Payload to store after [updated] replaced [previous]. Only a deck that matches no shipped
-     * preset is remembered; applying a preset leaves the saved custom deck untouched.
+     * Payload to store after [updated] was written. Only a deck that matches no shipped preset is
+     * remembered; applying a preset leaves the saved custom deck untouched.
      */
     fun remember(memory: String, updated: KeyboardProfile): String =
         if (KeyboardPresets.selectedId(updated) == KeyboardPresets.CUSTOM_ID) snapshot(updated) else memory
